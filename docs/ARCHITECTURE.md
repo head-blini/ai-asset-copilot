@@ -1,12 +1,12 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation과 Market Data 정규화다. AI·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation, Market Data 정규화, 현재 미국 계좌 분석이다. AI·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
 
 ## 1. 공통 Domain과 의존성
 
 미국 장기 자산운용과 한국 전략 검증은 계좌, 포트폴리오, 현금, 포지션, 거래, 평가 시점 등의 공통 개념을 공유한다. 시장별 거래 규칙과 제공자 통신은 별도 경계에 둔다. Domain은 AI SDK, Broker SDK, Market Data SDK, DB·ORM, 웹 프레임워크를 import하지 않는다.
 
-향후 application orchestration은 Domain 계산과 Risk 검사를 호출하고 필요한 provider 계약을 주입받는다. Infrastructure adapter가 이 계약을 구현한다. 초기에는 별도의 application 패키지를 미리 만들지 않고 구현되는 use case에 맞춰 배치한다.
+Phase 3 `application`은 Repository와 MarketDataProvider 계약을 주입받아 순수 Portfolio 계산을 호출한다. 향후 다른 use case의 Risk 검사와 실행 권한은 별도 경계에서 정의한다. Infrastructure adapter가 이 계약을 구현한다.
 
 ```mermaid
 flowchart LR
@@ -16,16 +16,17 @@ flowchart LR
     DOMAIN --> VALUE[공통 금융 개념]
 ```
 
-화살표는 의존성 방향이다. 외부 제공자 응답은 경계에서 내부 데이터로 변환한다. Domain 테스트는 네트워크나 실제 계좌 없이 실행 가능해야 한다. Phase 1의 Decimal·원가·거래 시각 기준은 명세 17절에서 정했고, FX·표시·Broker·세금 반올림은 OD-01에 남겨 두었다.
+화살표는 의존성 방향이다. 외부 제공자 응답은 경계에서 내부 데이터로 변환한다. Domain 테스트는 네트워크나 실제 계좌 없이 실행 가능해야 한다. Phase 1의 Decimal·원가·거래 시각 기준은 명세 17절에서 정했고, Phase 3는 현재 USD/KRW 보고 환산만 정했다. 역사적 성과용 FX 기준과 표시·Broker·세금 반올림은 OD-01에 남겨 두었다.
 
 ## 2. 논리적 모듈
 
-아래는 책임 지도다. Phase 1의 `domain`, `portfolio`, `storage`와 Phase 2의 `market`을 구현했으며 나머지는 실제 책임이 생길 때 만든다.
+아래는 책임 지도다. Phase 1의 `domain`, `portfolio`, `storage`, Phase 2의 `market`, Phase 3의 `application`을 구현했으며 나머지는 실제 책임이 생길 때 만든다.
 
 | 모듈 | 책임 | 경계 |
 | --- | --- | --- |
 | `domain` | 공통 식별자·금융 개념·불변식·provider/repository 계약 | 외부 SDK와 저장소 구현에 독립 |
 | `portfolio` | 계좌·포지션·거래·현금과 평가·손익 계산 | 계산 결과의 근거와 시점 보존 |
+| `application` | Repository·Market Provider를 조합한 현재 미국 계좌 분석 | 관측 시점·통화·신선도 확인 후 순수 계산 호출 |
 | `market` | 가격·FX·시장 상태의 조회 계약과 정규화 | 외부 API adapter와 순수 데이터 검증 분리 |
 | `research` | Research 자료, Investment Thesis, Decision Journal | 당시 근거와 사후 결과를 구분 |
 | `risk` | Portfolio Policy, 자금·포지션·손실 제한의 코드 기반 검증 | LLM 해석에 의해 판정이 바뀌지 않음 |
@@ -44,7 +45,15 @@ flowchart LR
 
 Twelve Data `/quote`는 기본 `1day`의 `close`와 마지막 1분 캔들 시각이 섞이지 않도록 `interval=1min`을 명시한다. 응답의 `timestamp`와 `last_quote_at`이 동일한 1분 캔들을 가리킬 때만 그 캔들 시작 시각을 `as_of`로 쓴다. 둘이 없거나 다르면 `as_of=None`이다. 이 시각은 정확한 마지막 거래 시각이 아니며 가격 기준을 보수적으로 나타낸다. `/exchange_rate`의 `timestamp`는 환율 시각이다. 출처는 `twelve_data`이고 모든 내부 시간은 UTC다. `as_of=None`이면 최신 가격임을 입증할 수 없으므로 stale다. 호출자가 기준 시각과 `max_age`를 지정하고 투자용 threshold는 아직 정하지 않는다. `FxQuote.rate`는 base 1단위당 quote 통화 단위다. 제공자 오류를 명시적 Market Data 오류로 바꾸며 가상 가격 자동 fallback은 없다.
 
-Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestration에서 quote의 asset_id·통화·신선도·시점을 확인한 뒤 `{asset_id: Decimal}`을 만들어 전달한다. FX를 계좌 평가에 적용하지 않으며 최신 quote cache/과거 가격 history 테이블도 만들지 않는다. 데이터 라이선스, 시세 지연, 수정주가, 상장폐지, point-in-time 보장 및 실제 투자용 freshness 정책은 OD-04에 남긴다.
+Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestration에서 quote의 asset_id·통화·신선도·시점을 확인한 뒤 `{asset_id: Decimal}`을 만들어 전달한다. FX는 USD Ledger에 적용하지 않고 KRW 보고 값에만 사용한다. 최신 quote cache/과거 가격 history 테이블은 만들지 않았다. 데이터 라이선스, 시세 지연, 수정주가, 상장폐지, point-in-time 보장 및 실제 투자용 freshness 정책은 OD-04에 남긴다.
+
+### Phase 3 현재 상태 분석
+
+`USPortfolioAnalyzer`는 계좌 원장과 관련 Asset을 Repository에서 읽고 `replay()`로 상태를 재구성한다. 열린 Position의 asset_id별 `MarketQuote`를 조회하여 ID·통화·가격·출처·`as_of`와 명시된 `max_quote_age`를 검증한다. 실패한 quote가 하나라도 있으면 평가를 반환하지 않는다. USD/KRW `FxQuote`도 방향·환율·시각·신선도를 검증한다. 그 후 기존 `value_at_prices()`를 호출한다. 계산기는 Provider 또는 저장소를 import하지 않으며 Market adapter도 계산기를 호출하지 않는다.
+
+결과는 불변 `PortfolioAnalysis`다. `evaluated_at`은 UTC로 정규화하고, Position마다 quote의 `as_of`·`fetched_at`·source를 보존한다. FX에도 별도 시각·출처를 보존하고, 사용한 quote/FX max age와 strict freshness 통과 상태를 남긴다. 단일 `market_as_of`를 합성하지 않는다. STOCK·ETF·현금 노출은 계좌 총 USD 평가액 대비 비율이다. Sector는 직접 STOCK 분류만 합산하며 미분류 STOCK과 ETF 평가액을 따로 보인다. ETF holdings look-through는 없다. USD/KRW는 보고 환산액만 만들고 USD 원장·Cost Basis를 바꾸지 않는다.
+
+`trading_pnl`은 매매 실현손익과 열린 Position의 미실현손익의 합이다. DIVIDEND는 현금을 늘리지만 이 거래 손익에는 포함되지 않는다. 따라서 이 값은 총 투자수익률이 아니다. 과거 가격·snapshot history가 없어 CAGR·Max Drawdown·Volatility·Sharpe·Benchmark 성과를 만들지 않는다. 휴장일·주말을 고려한 freshness, 배당 포함 성과와 현금흐름 조정 방식은 OD-03/OD-04의 후속 결정이다. 실제 개인 거래 및 SQLite DB는 Git에서 제외한다.
 
 ## 3. 미국 분석과 네 포트폴리오
 
@@ -172,7 +181,7 @@ Replay 결과는 불변 `AccountSnapshot`이며 Cash, 현재 Position, 평균 �
 
 `TransactionRepository.append`는 `BEGIN IMMEDIATE`로 쓰기 잠금을 얻은 후 해당 계좌의 기록을 읽고, 새 이벤트를 포함한 전체 Ledger를 유효 시각 순으로 Domain replay하여 검증하고, 성공하면 INSERT 후 commit한다. 과거 시점 backfill도 이 검증을 통과하면 저장하며 실패 시 rollback한다. 각 연결은 foreign key 검사를 켠다. 별도 연결을 통한 이중 지출도 순서대로 검증한다. 이것은 Phase 1의 단순한 동시성 계약이며 실제 주문 실행·예약·대사는 OD-07 범위다. 직접 DB 접근으로 규칙을 우회하지 않는 것이 application 계약이며, SQLite 파일에 대한 운영 권한 통제는 별도 과제다.
 
-Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원가는 그 시점 잔여 원가 비율로 배분하고 최종 매도에서는 잔여 원가 전부를 제거한다. Dividend는 원가를 바꾸지 않는다. Cash Asset은 만들지 않았다. Cash는 거래 이벤트에서 파생되는 단일 통화 계좌 상태이고, Asset 테이블은 거래·배당 대상 STOCK/ETF를 표현하기 때문이다. Tax Lot, 기업행사, FX와 외부 가격 시점은 해당 후속 Phase에서 정의한다.
+Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원가는 그 시점 잔여 원가 비율로 배분하고 최종 매도에서는 잔여 원가 전부를 제거한다. Dividend는 원가를 바꾸지 않는다. Cash Asset은 만들지 않았다. Cash는 거래 이벤트에서 파생되는 단일 통화 계좌 상태이고, Asset 테이블은 거래·배당 대상 STOCK/ETF를 표현하기 때문이다. Tax Lot, 기업행사와 역사적 성과용 FX·가격 시점 기준은 후속 Phase에서 정의한다.
 
 ## 11. Phase 1 감사에서 보완한 경계
 
@@ -182,4 +191,4 @@ Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원�
 - COMMIT을 예외 처리 범위에 포함하고, 중단 예외도 rollback 후 다시 전달한다. `SQLITE_BUSY`로 commit이 실패한 뒤 미완료 INSERT와 잠금이 남는 것을 방지한다. `recursive_triggers`를 켜 REPLACE도 불변 트리거를 거치게 한다.
 - 기존 테스트에 반복 소수 수량 매도·재진입·다중 자산 손익·과도한 매도 수수료·DST 왕복·실제 commit 경합·동시 append를 추가했다. Phase 1 원장과 저장 검증이며, Broker 주문 예약·재시도·대사 검증을 대체하지 않는다.
 
-남은 제한: `SQLiteStore.connection`은 관리·진단용 raw connection을 노출하므로 application은 Repository 계약만 사용해야 한다. 외부 연결이나 직접 SQL로 새 이벤트 삽입·설정 변경을 하는 것은 불변식 보장 범위 밖이다. 전체 replay 기반 append의 장기 성능, Ledger 숫자 입력의 자릿수·지수 자원 한도, migration·backup 운영은 후속 결정이 필요하다. Market Quote에는 currency·기준 시각·출처가 있지만 순수 Portfolio 가격 mapping에는 없으므로 Phase 3 orchestration이 quote 검증과 변환을 맡아야 한다.
+남은 제한: `SQLiteStore.connection`은 관리·진단용 raw connection을 노출하므로 application은 Repository 계약만 사용해야 한다. 외부 연결이나 직접 SQL로 새 이벤트 삽입·설정 변경을 하는 것은 불변식 보장 범위 밖이다. 전체 replay 기반 append의 장기 성능, Ledger 숫자 입력의 자릿수·지수 자원 한도, migration·backup 운영은 후속 결정이 필요하다. Market Quote에는 currency·기준 시각·출처가 있지만 순수 Portfolio 가격 mapping에는 없으므로 Phase 3 application이 quote 검증과 변환을 맡는다.

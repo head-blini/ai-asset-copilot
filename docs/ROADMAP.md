@@ -1,13 +1,13 @@
 # Development Roadmap
 
-[PROJECT_SPEC.md](../PROJECT_SPEC.md)가 authoritative specification이다. 이 문서는 그 로드맵을 구현 범위와 완료 조건으로 구체화한다. **Phase 0~2는 완료**, 다음 단계는 Phase 3 US Portfolio Analytics다. 단계 완료는 자동 자금 투입 승인을 뜻하지 않는다.
+[PROJECT_SPEC.md](../PROJECT_SPEC.md)가 authoritative specification이다. 이 문서는 그 로드맵을 구현 범위와 완료 조건으로 구체화한다. **Phase 0~3은 완료**, 다음 단계는 Phase 4 US Portfolio Policy다. 단계 완료는 자동 자금 투입 승인을 뜻하지 않는다.
 
 | Phase | 주제 | 권장 범위와 완료 조건 |
 | --- | --- | --- |
 | 0 | Project Bootstrap / Architecture | 완료. 최소 패키지·설정 선언·핵심 문서·pytest 환경 |
 | 1 | Portfolio Foundation | 완료. 공통 포트폴리오·계좌·자산과 Ledger 재생, Decimal 계산·수동 가격 평가, SQLite 저장·재조회 및 테스트 |
 | 2 | Market Data | 완료. Provider 계약과 Twelve Data 가격·FX 정규화, 출처·시각·stale 판정·오류 격리의 오프라인 검증 |
-| 3 | US Portfolio Analytics | 평가·손익·비중·현금·Sector·FX 노출과 성과 지표. Benchmark와 계산 기준 결정 및 검증 |
+| 3 | US Portfolio Analytics | 완료. 현재 USD 계좌 평가·거래손익·비중·직접 Sector 노출·KRW 보고 환산, quote/FX 신선도 및 출처 검증. 역사적 성과와 Benchmark 방법론은 OD-03에 유지 |
 | 4 | US Portfolio Policy | 인간 소유 설정 loader/validator, 범위·집중도·Risk 평가. Policy 변경 이력·권한·경계값 검증 |
 | 5 | US Shadow Engine | POLICY/AI Shadow의 독립 가상 상태·체결과 Benchmark 비교. 현금흐름·비용·판단 시점 일관성 검증 |
 | 6 | Research / Investment Thesis | Thesis 필드·상태·이력, Research 근거, Decision Journal과 후속 Review의 기록 기반 |
@@ -37,7 +37,7 @@ Phase 1 구현 기준과 완료 검증 범위의 기록이다. OD-01과 OD-06 �
 4. Repository 계약과 최소 SQLite Schema를 결정하고 저장·재조회·트랜잭션의 일관성을 검증한다. ORM 필요성은 별도로 판단한다.
 5. 입출금·매수·매도·수수료·소수 수량·잘못된 입력·계좌 간 격리와 저장 왕복을 테스트한다. 확정하지 않은 금융 이벤트는 명시적으로 지원하지 않는 것으로 처리한다.
 
-완료 조건은 동일 입력에서 재현 가능한 기본 계산, 계좌 격리, 저장 후 동일 상태 복원, 금융 규칙의 문서화와 테스트다. Phase 3의 전체 성과 분석, Policy 실행, Shadow, AI, Strategy, Broker 실행은 각 후속 단계에서 추가한다.
+완료 조건은 동일 입력에서 재현 가능한 기본 계산, 계좌 격리, 저장 후 동일 상태 복원, 금융 규칙의 문서화와 테스트다. 현재 상태 분석은 Phase 3에서 구현했다. 역사적 성과, Policy 실행, Shadow, AI, Strategy, Broker 실행은 데이터와 계약이 확보되는 후속 단계에서 추가한다.
 
 ## 모델과 검수
 

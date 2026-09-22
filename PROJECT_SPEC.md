@@ -4,7 +4,7 @@
 
 이 문서는 `ai-asset-copilot`의 **authoritative specification**이다. 요구사항 충돌 시 이 문서를 기준으로 해결하며, 정책 변경은 인간의 명시적 결정으로 반영한다. README는 진입 안내, Architecture는 설계 설명, Roadmap은 단계별 작업 범위를 제공한다.
 
-현재 구현 완료 단계는 **Phase 2 — Market Data**다. Phase 1의 계좌별 Ledger, 기본 금융 계산, SQLite 저장 위에 시장 가격·FX 정규화와 첫 HTTP adapter를 추가했다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
+현재 구현 완료 단계는 **Phase 3 — US Portfolio Analytics**다. 계좌별 Ledger와 Market Data를 application 계층에서 연결해 미국 USD 계좌의 현재 상태를 분석한다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
 
 ## 2. 목적과 불변 원칙
 
@@ -205,7 +205,7 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 
 | ID | 미결정 사항 | 결정 시점 |
 | --- | --- | --- |
-| OD-01 | Phase 1 확정: Decimal만 사용, 중간 통화 반올림 없음, 이동 가중평균 원가, 매수 수수료 원가 포함·매도 수수료 실현손익 차감, 불투명 문자열 ID, 시간대가 있는 금융 이벤트 시각과 계좌별 기록 sequence. 미결정: 표시·Broker·세금 반올림, FX 기준, 추가 기업행사, 시장 가격의 평가 시점 | Phase 1 일부 확정; 나머지는 해당 Phase에서 결정 |
+| OD-01 | Phase 1 확정: Decimal만 사용, 중간 통화 반올림 없음, 이동 가중평균 원가, 매수 수수료 원가 포함·매도 수수료 실현손익 차감, 불투명 문자열 ID, 시간대가 있는 금융 이벤트 시각과 계좌별 기록 sequence. Phase 3 현재 분석에는 명시적 `evaluated_at`과 개별 quote `as_of`를 보존한다. 미결정: 표시·Broker·세금 반올림, 역사적 성과용 FX·가격 시점 기준, 추가 기업행사 | Phase 1·3 일부 확정; 나머지는 해당 Phase에서 결정 |
 | OD-02 | 자산·Sector 분류와 ETF look-through, 비중 분모, Risk 한도 적용 대상, 경계값 포함 여부, 리밸런싱 트리거·거래 우선순위, 위반 상태 복구, 인간 Policy 변경 승인·버전 적용 방식 | Phase 4; Shadow 실행 전 |
 | OD-03 | Benchmark 자산, 초기 자본·입출금 대응, 배당 재투자, TWR/MWR 등 수익률 기준, 비교 통화·기간·체결 가정, Sharpe 무위험 수익률·연율화, 집중도 정의 | Phase 3–5 |
 | OD-04 | Phase 2 확정: 첫 Market Data adapter는 Twelve Data, 내부 계약은 provider-neutral, 가격·FX quote의 출처·통화·시점 및 오류 경계 정의. 미결정: 데이터 라이선스·지연·수정주가·상장폐지 종목·point-in-time coverage의 투자용 적합성, 투자용 freshness threshold, AI Provider·모델과 개인정보 전송 범위 | Market Data 일부 Phase 2 확정; 투자 사용 전 데이터 검증, AI: Phase 7 |
@@ -250,4 +250,14 @@ Phase 1 감사 보완: `executed_at` 정렬 시 UTC의 실제 시각을 비교�
 
 `MarketQuote`는 asset_id, 양의 유한 Decimal 가격, 통화, `as_of`, `fetched_at`, 출처를 가진다. `FxQuote`는 기준 통화 1단위당 상대 통화 단위의 양의 유한 Decimal 환율과 같은 시점·출처 정보를 가진다. 예를 들어 USD/KRW 1370은 1 USD = 1370 KRW다. `as_of`는 제공자가 확인한 시장 가격의 기준 시각이며 제공하지 않으면 `None`이다. `fetched_at`은 시스템 조회 시각이다. 둘은 시간대가 있어야 하며 UTC로 정규화한다. Twelve Data `/quote`는 `interval=1min`으로 조회한다. `close`가 속한 1분 캔들의 시작을 나타내는 `timestamp`와 마지막 1분 캔들을 나타내는 `last_quote_at`이 모두 존재하고 같을 때만 이 보수적인 캔들 기준 시각을 `as_of`로 사용한다. 하나라도 없거나 다르면 `as_of=None`이다. 이는 마지막 개별 거래의 정확한 시각을 뜻하지 않는다.
 
-신선도는 quote에 영구 boolean으로 저장하지 않는다. 호출자가 제공한 평가 시각과 `max_age`로 순수 판정하며, 미상 또는 미래의 `as_of`는 stale로 판정한다. 투자용 age threshold와 장 마감·FX별 정책은 미결정이다. 인증·한도·잘못된 symbol·응답 손상·네트워크·시간 초과는 adapter의 명시적 오류로 격리하며 mock 가격으로 자동 대체하지 않는다. 숫자는 JSON에서 float를 경유하지 않고 Decimal로 읽으며 길이·크기를 제한한다. Phase 1의 `value_at_prices()`는 변경하지 않는다. 상위 orchestration이 quote currency·시점·신선도를 검증하고 `{asset_id: Decimal price}`를 넘겨야 하며, 그 연결 및 USD 계좌의 KRW 통합 평가는 Phase 3 범위다. Market Quote 저장 테이블과 과거 데이터 엔진은 이번 Phase에 추가하지 않는다.
+신선도는 quote에 영구 boolean으로 저장하지 않는다. 호출자가 제공한 평가 시각과 `max_age`로 순수 판정하며, 미상 또는 미래의 `as_of`는 stale로 판정한다. 투자용 age threshold와 장 마감·FX별 정책은 미결정이다. 인증·한도·잘못된 symbol·응답 손상·네트워크·시간 초과는 adapter의 명시적 오류로 격리하며 mock 가격으로 자동 대체하지 않는다. 숫자는 JSON에서 float를 경유하지 않고 Decimal로 읽으며 길이·크기를 제한한다. Phase 1의 `value_at_prices()`는 변경하지 않는다. Phase 3 orchestration이 quote currency·시점·신선도를 검증하고 `{asset_id: Decimal price}`를 넘긴다. Market Quote 저장 테이블과 과거 데이터 엔진은 Phase 2에 추가하지 않았다.
+
+## 19. Phase 3 현재 미국 계좌 분석 계약
+
+`application.USPortfolioAnalyzer`는 Account·Transaction·Asset Repository와 MarketDataProvider를 주입받아 **한 USD Account**의 Ledger를 재생한다. Portfolio ID 또는 계좌명을 계산 규칙에 하드코딩하지 않는다. 열린 Position의 Asset ID로 가격을 조회하고, quote의 ID·통화·양의 Decimal 가격·출처·`as_of`를 검증한 뒤 기존 `value_at_prices()`에 가격 mapping을 전달한다. USD/KRW FX의 방향·양의 Decimal 환율·출처·`as_of`도 확인한다. 필요한 quote 또는 FX가 누락되거나 기준 시각을 알 수 없거나 미래·stale이면 현재 평가를 거부한다. `max_quote_age`와 `max_fx_age`는 호출자가 명시하며 실제 운영 임계값은 OD-04에 남긴다. 거래가 `evaluated_at` 이후에 실행되었다면 그 평가를 거부한다.
+
+불변 `PortfolioAnalysis`에는 UTC `evaluated_at`, 현금·투자자산·계좌 USD 평가액, 남은 취득 원가, 거래 실현·미실현손익, Position별 수량·평균원가·가격·가치·비중, 현금·STOCK·ETF 노출, 직접 분류된 STOCK Sector 노출과 미분류 STOCK·ETF 평가액, 개별 quote 및 FX의 출처·`as_of`·`fetched_at`, 적용한 freshness 한도와 통과 상태를 담는다. 전부 USD 계좌 자산이므로 USD 노출은 계좌 총가치의 100%로 표현하되 0 가치 계좌의 비율은 정의하지 않는다. `trading_pnl = trading_realized_pnl + unrealized_pnl`은 **거래 손익**으로만 해석한다. DIVIDEND는 Ledger 현금을 늘리지만 이 값에는 포함되지 않는다. 이를 총 투자수익률이나 세후 성과로 표시하지 않는다.
+
+Direct Sector Exposure는 Sector가 명시된 STOCK의 직접 평가액만 합산한다. ETF의 Sector 필드가 있더라도 구성종목 look-through로 취급하지 않는다. USD/KRW 환산은 `USD 계좌 평가액 × USD/KRW 환율`의 KRW **보고 값**이며 USD Ledger 원가를 바꾸거나 FX PnL을 계산하지 않는다. 분석용 개인 거래·보유 정보와 로컬 DB는 Git에 저장하지 않는다. `data/`는 ignore 상태를 유지한다. NYSE/Nasdaq 휴장일을 반영하지 않는 단순 elapsed-time freshness는 정상 종가도 stale로 거절할 수 있으며, calendar-aware 정책은 후속 결정이다.
+
+Phase 3는 현재 상태 분석이다. 과거 가격·계좌 snapshot 이력이 없으므로 연율수익률·CAGR·Drawdown·Volatility·Sharpe·장기 Benchmark 비교는 계산하지 않는다. Benchmark 선택, 배당 포함 수익률, 현금흐름 조정 및 역사적 성과 방법론은 OD-03의 Open Decision으로 남긴다. AI·Broker·주문·리밸런싱 기능도 없다.
