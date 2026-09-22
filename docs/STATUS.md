@@ -9,7 +9,8 @@ Last verified: 2026-09-22 (KST). Canonical repository: `head-blini/ai-asset-copi
 - Main / origin/main: `0071d2b074be686392348ad6fbeec47d596e90de`.
 - Candidate branch: `feat/phase-4-policy-engine`.
 - Original candidate implementation: `681ef60e3977eda701c7544cfcd32d9b5e685071` (not merged).
-- Corrected candidate: the source/test correction commit accompanying this status; an exact SHA provenance update follows without further source changes.
+- Audited corrected Policy implementation SHA: `36eafe8e80d433fdf2f728b14a34be072ce67233`.
+- Subsequent verification-record commits change documentation only; the remote branch HEAD identifies the latest governance document revision.
 - Governance recovery commit: `c810c56a23cc9081fafac702e8a545107bb89f17`.
 - Remote refs checked directly on GitHub via `git ls-remote`; candidate was 1 commit ahead / 0 behind main at audit start.
 - Phase 4 merge: **NO**. Next-phase entry: **NO**. Phase 5 remains US Shadow Engine and is not started.
