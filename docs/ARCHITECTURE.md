@@ -55,6 +55,14 @@ Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestrati
 
 `trading_pnl`은 매매 실현손익과 열린 Position의 미실현손익의 합이다. DIVIDEND는 현금을 늘리지만 이 거래 손익에는 포함되지 않는다. 따라서 이 값은 총 투자수익률이 아니다. 과거 가격·snapshot history가 없어 CAGR·Max Drawdown·Volatility·Sharpe·Benchmark 성과를 만들지 않는다. 휴장일·주말을 고려한 freshness, 배당 포함 성과와 현금흐름 조정 방식은 OD-03/OD-04의 후속 결정이다. 실제 개인 거래 및 SQLite DB는 Git에서 제외한다.
 
+### Phase 3 감사에서 명확히 한 계약
+
+`evaluated_at`은 현재 호출의 Ledger cutoff와 freshness 기준이다. `as_of`는 그 시각 및 `fetched_at`보다 늦을 수 없지만, 실제 취득은 호출 시작 후 완료되므로 `fetched_at > evaluated_at`은 허용한다. 모든 비교는 UTC이며 Provider clock의 정확성은 adapter 책임이다. 이 API는 과거 시점에 무엇을 알 수 있었는지 재현하는 API가 아니다. 역사적 분석에는 관측의 가용 시각·수정 이력과 당시 Ledger를 별도로 정의해야 한다.
+
+검증한 Quote를 application 소유 mapping에 보존하고 가격과 결과 메타데이터 모두에 같은 불변 observation을 사용한다. FX 조회 중 Provider cache가 갱신되어도 이미 사용한 가격의 provenance가 바뀌지 않는다. extra quote는 사용하지 않고 필수 quote 누락은 거부한다. MarketDataError 하위 오류는 그대로 전달하며, 의미 검증은 AnalysisError, Ledger 위반은 replay의 ValueError, 저장소 장애는 Repository 오류로 구분한다. 부분 결과나 자동 fallback은 없다.
+
+빈 계좌에도 환율·출처·시각을 제공하는 기존 결과 계약을 유지하므로 FX가 실패하면 분석도 실패한다. 산술상 0 환산에 FX가 필요해서가 아니라 명시적인 환율 관측을 제공하기 위한 계약이다. FX 없는 결과 모델은 이번 감사에서 도입하지 않는다. USD exposure는 평가 통화 기준이며 경제적 통화 노출은 아니다. Sector 비중은 현금 포함 총가치가 분모다. 금액 합계는 정확하나 순환소수 비율의 합계에는 기존 Decimal 나눗셈 정밀도 수준의 잔차가 있을 수 있다. Policy 경계에서 이를 다루는 방식은 OD-02로 남긴다.
+
 ## 3. 미국 분석과 네 포트폴리오
 
 ```mermaid

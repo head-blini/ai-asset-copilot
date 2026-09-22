@@ -345,3 +345,111 @@ def test_financial_totals_ignore_caller_decimal_context(scenario):
         result = analyze(analyzer)
     assert result.total_value_usd == D("2000")
     assert result.total_value_krw == D("2740246.9135780246913578000")
+
+
+@pytest.mark.parametrize("change", ["replace", "remove"])
+def test_valuation_keeps_the_validated_observation_during_fx_fetch(scenario, monkeypatch, change):
+    _, _, feed, analyzer = scenario
+
+    def fetch_fx(base, quote_currency):
+        # A provider may refresh its shared cache while servicing another request.
+        if change == "replace":
+            feed.quotes["asset-aaa"] = replace(
+                feed.quotes["asset-aaa"], price=D("999"), source="replacement_feed",
+                as_of=NOW - timedelta(days=1),
+            )
+        else:
+            del feed.quotes["asset-aaa"]
+        return feed.fx
+
+    monkeypatch.setattr(feed, "get_fx_rate", fetch_fx)
+    result = analyze(analyzer)
+    position = next(item for item in result.positions if item.asset_id == "asset-aaa")
+    assert position.market_price == D("100")
+    assert position.market_value == D("200")
+    assert position.quote_source == "fixture_feed"
+    assert position.quote_as_of == NOW - timedelta(minutes=2)
+    assert position.quote_fetched_at == NOW
+
+
+def test_current_fetch_can_finish_after_evaluated_at_and_extra_quotes_are_ignored(scenario):
+    _, _, feed, analyzer = scenario
+    later = NOW + timedelta(seconds=2)
+    feed.quotes = {key: replace(value, fetched_at=later) for key, value in feed.quotes.items()}
+    feed.fx = replace(feed.fx, fetched_at=later)
+    feed.quotes["unused"] = MarketQuote("unused", D("999"), Currency.KRW, None, later, "unused")
+    result = analyze(analyzer)
+    assert result.total_value_usd == D("2000")
+    assert len(result.positions) == 3
+    assert all(position.quote_fetched_at == later for position in result.positions)
+    assert result.fx_fetched_at == later
+    assert result.evaluated_at == NOW
+
+
+def test_quote_and_fx_freshness_thresholds_are_independent(scenario):
+    _, _, _, analyzer = scenario
+    with pytest.raises(AnalysisError, match="stale FX"):
+        analyze(analyzer, max_fx_age=timedelta(seconds=59))
+    with pytest.raises(AnalysisError, match="stale quote"):
+        analyze(analyzer, max_quote_age=timedelta(minutes=3))
+    assert analyze(analyzer, max_fx_age=timedelta(minutes=1)).fx_fresh
+
+
+@pytest.mark.parametrize("stage", ["get_quotes", "get_fx_rate"])
+@pytest.mark.parametrize("error_name", ["AuthenticationError", "RateLimitError", "NetworkError", "ResponseError"])
+def test_provider_errors_propagate_without_partial_analysis(scenario, monkeypatch, stage, error_name):
+    from asset_copilot.market import errors
+
+    _, _, feed, analyzer = scenario
+    failure = getattr(errors, error_name)("offline fixture failure")
+
+    def fail(*args):
+        raise failure
+
+    monkeypatch.setattr(feed, stage, fail)
+    with pytest.raises(type(failure)) as caught:
+        analyze(analyzer)
+    assert caught.value is failure
+
+
+def test_repeating_exposure_ratios_are_context_independent(scenario):
+    from decimal import Inexact, ROUND_DOWN
+    from fractions import Fraction
+
+    store, _, feed, analyzer = scenario
+    store.transactions.append(event(5, TransactionType.WITHDRAW, amount=D("1199")))
+    feed.quotes["asset-aaa"] = quote("asset-aaa", "0.25", 2)
+    feed.quotes["asset-bbb"] = quote("asset-bbb", "1", 3)
+    feed.quotes["asset-fund"] = quote("asset-fund", "1", 4)
+    ordinary = analyze(analyzer)
+    with localcontext() as context:
+        context.prec = 4
+        context.rounding = ROUND_DOWN
+        context.traps[Inexact] = True
+        result = analyze(analyzer)
+    assert result == ordinary
+    assert result.cash_balance == D("1")
+    assert result.invested_market_value == D("2")
+    assert result.total_value_usd == D("3")
+    # Exact rational oracle: three equal buckets. Decimal cannot represent 1/3
+    # exactly, so verify a tight error bound without rounding in the test context.
+    ratios = (result.cash_ratio, result.stock_exposure, result.etf_exposure)
+    for ratio in ratios:
+        assert abs(Fraction(ratio) - Fraction(1, 3)) < Fraction(1, 10**79)
+    assert abs(sum(map(Fraction, ratios)) - 1) < Fraction(1, 10**79)
+
+
+def test_backfill_and_transfers_preserve_pnl_and_analysis_does_not_write(scenario):
+    store, assets, _, analyzer = scenario
+    store.transactions.append(replace(event(5, TransactionType.DEPOSIT, amount=D("100")),
+                                      executed_at=TRADED - timedelta(days=1)))
+    store.transactions.append(event(6, TransactionType.WITHDRAW, amount=D("50")))
+    before = store.transactions.list_for_account(ACCOUNT_ID)
+    account_before = store.accounts.get(ACCOUNT_ID)
+    result = analyze(analyzer)
+    assert result.cash_balance == D("1250")
+    assert result.total_value_usd == D("2050")
+    assert result.trading_realized_pnl == result.unrealized_pnl == result.trading_pnl == D("0")
+    assert store.transactions.list_for_account(ACCOUNT_ID) == before
+    assert store.accounts.get(ACCOUNT_ID) == account_before
+    assert {key: store.assets.get(key) for key in assets} == assets

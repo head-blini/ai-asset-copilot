@@ -138,6 +138,11 @@ class USPortfolioAnalyzer:
 
     def analyze(self, account_id: str, *, evaluated_at: datetime,
                 max_quote_age: timedelta, max_fx_age: timedelta) -> PortfolioAnalysis:
+        """Evaluate current holdings at a caller-supplied freshness reference time.
+
+        Fetches may complete after evaluated_at; this is not a historical,
+        point-in-time query. MarketDataError subclasses propagate unchanged.
+        """
         evaluation_time = _evaluated_at(evaluated_at)
         _max_age(max_quote_age, "max_quote_age")
         _max_age(max_fx_age, "max_fx_age")
@@ -164,11 +169,15 @@ class USPortfolioAnalyzer:
         if not isinstance(quotes, Mapping):
             raise AnalysisError("market data provider returned invalid quotes")
         prices: dict[str, Decimal] = {}
+        validated_quotes: dict[str, MarketQuote] = {}
         for asset in open_assets:
             quote = quotes.get(asset.id)
             if quote is None:
                 raise AnalysisError(f"missing quote for asset_id {asset.id}")
             _validate_quote(quote, asset, evaluation_time, max_quote_age)
+            # Retain the exact immutable observation used for this price, even if
+            # the provider refreshes its returned mapping during the FX request.
+            validated_quotes[asset.id] = quote
             prices[asset.id] = quote.price
         valuation = value_at_prices(snapshot, prices)
 
@@ -183,7 +192,7 @@ class USPortfolioAnalyzer:
         sector_values: dict[str, Decimal] = {}
         for valued in valuation.positions:
             asset = assets[valued.position.asset_id]
-            quote = quotes[asset.id]
+            quote = validated_quotes[asset.id]
             positions.append(PositionAnalysis(
                 asset_id=asset.id, ticker=valued.position.ticker,
                 asset_type=asset.asset_type, sector=asset.sector if asset.asset_type is AssetType.STOCK else None,

@@ -261,3 +261,12 @@ Phase 1 감사 보완: `executed_at` 정렬 시 UTC의 실제 시각을 비교�
 Direct Sector Exposure는 Sector가 명시된 STOCK의 직접 평가액만 합산한다. ETF의 Sector 필드가 있더라도 구성종목 look-through로 취급하지 않는다. USD/KRW 환산은 `USD 계좌 평가액 × USD/KRW 환율`의 KRW **보고 값**이며 USD Ledger 원가를 바꾸거나 FX PnL을 계산하지 않는다. 분석용 개인 거래·보유 정보와 로컬 DB는 Git에 저장하지 않는다. `data/`는 ignore 상태를 유지한다. NYSE/Nasdaq 휴장일을 반영하지 않는 단순 elapsed-time freshness는 정상 종가도 stale로 거절할 수 있으며, calendar-aware 정책은 후속 결정이다.
 
 Phase 3는 현재 상태 분석이다. 과거 가격·계좌 snapshot 이력이 없으므로 연율수익률·CAGR·Drawdown·Volatility·Sharpe·장기 Benchmark 비교는 계산하지 않는다. Benchmark 선택, 배당 포함 수익률, 현금흐름 조정 및 역사적 성과 방법론은 OD-03의 Open Decision으로 남긴다. AI·Broker·주문·리밸런싱 기능도 없다.
+
+### Phase 3 감사: 시점·관측·오류 계약
+
+- `evaluated_at`은 호출자가 현재 분석 시작 시점에 지정하는 **Ledger cutoff 및 freshness 기준 시각**이다. 조회 완료 시각이나 역사적 point-in-time 보장을 뜻하지 않는다. `as_of <= evaluated_at`과 `as_of <= fetched_at`을 요구하지만, 호출 후 fetch가 끝날 수 있으므로 `fetched_at <= evaluated_at`은 요구하지 않는다. `fetched_at`을 가격 시각으로 대체하지 않는다. 과거 evaluated_at을 입력해도 당시 알려져 있던 정보의 재현을 보장하지 않으며, historical analytics에는 별도 observation availability·revision·Ledger snapshot 계약이 필요하다. Provider clock의 실제 정확성은 adapter 책임이며 임의의 clock-skew 허용치를 만들지 않는다.
+- 검증에 사용한 불변 Quote 자체를 보존하여 가격과 provenance를 같은 observation에 묶는다. Provider의 반환 mapping이 이후 갱신되어도 분석 결과의 출처·시각이 바뀌지 않는다. 요청하지 않은 extra quote는 무시하며 필수 quote의 누락은 계속 거부한다.
+- 빈 계좌도 현재 결과 계약상 유효한 USD/KRW 환율과 provenance를 제공하므로 FX 조회·검증을 수행한다. 0 USD = 0 KRW라는 산술에 환율이 필요한 것은 아니다. FX 장애 시 빈 계좌 분석도 실패하는 제약을 유지하며, 환율을 1 또는 0으로 꾸미지 않는다. 향후 FX 없는 분석을 지원하려면 환율·출처·freshness의 부재를 명시하는 별도 계약이 필요하다.
+- Direct Sector의 비중 분모는 **현금을 포함한 계좌 총가치**다. 직접 분류 STOCK + 미분류 STOCK + ETF 평가액은 투자자산 평가액과 일치한다. `usd_exposure`는 계좌 평가 통화의 비중이며, 기업 매출 통화나 ETF 내부 자산의 경제적 FX 노출을 측정하지 않는다.
+- 각 exposure는 해당 평가액 / 계좌 총가치다. 금액 합계는 정확하게 보존하지만 순환소수 비율은 17절의 Decimal 나눗셈 정밀도를 따르므로 비율 합계의 미세한 잔차는 가능하다. 합계를 1로 만들려고 특정 분류의 비중을 임의 보정하지 않는다. Policy 경계값 비교 방식은 OD-02에서 정한다.
+- Provider의 `MarketDataError` 하위 오류는 원인을 보존하여 그대로 전파한다. 계좌·관측의 의미 검증 실패는 `AnalysisError`, Ledger 불변식 위반은 기존 replay의 `ValueError`다. Repository의 저장소 장애는 그 계층의 오류로 전파한다. 실패 시 부분 분석이나 가상 가격을 반환하지 않는다.
