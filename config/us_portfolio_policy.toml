@@ -1,0 +1,33 @@
+# Human-owned initial policy; requirements: PROJECT_SPEC.md section 4.
+# Values use percentage points: 50 means 50%, not 0.50.
+# Phase 0 declares data only. No loader, validator, or enforcement exists yet.
+# These fields are not an authorization mechanism. AI must never write policy.
+policy_version = "initial-v1"
+
+[target_percent]
+core_etf = 50
+growth_etf = 15
+individual_stocks = 25
+cash = 10
+
+[range_percent.core_etf]
+min = 40
+max = 60
+
+[range_percent.growth_etf]
+min = 10
+max = 20
+
+[range_percent.individual_stocks]
+min = 15
+max = 30
+
+[range_percent.cash]
+min = 5
+max = 20
+
+[risk_percent]
+individual_position_max = 15
+concentration_warning = 12
+sector_max = 35
+individual_stocks_total_max = 30

@@ -1,0 +1,5 @@
+# Initial virtual capital only; this file cannot enable live trading.
+# Phase 0 has no configuration loader or trading runtime.
+portfolio_id = "KR_PAPER"
+currency = "KRW"
+initial_virtual_capital = 10000000
