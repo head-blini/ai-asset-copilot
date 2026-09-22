@@ -6,6 +6,8 @@
 
 현재 구현 완료 단계는 **Phase 3 — US Portfolio Analytics**다. 계좌별 Ledger와 Market Data를 application 계층에서 연결해 미국 USD 계좌의 현재 상태를 분석한다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
 
+ChatGPT 웹은 설계·우선순위·중요 검토, Codex는 구현·테스트·문서 작업을 돕는 개발 도구다. 어느 쪽도 제품의 런타임 승인 주체가 아니다. 런타임에는 코드가 입력과 관측을 검증하고 금융 계산·Policy·Risk 판정을 담당한다. AI 응답은 별도 검증 전에는 제안·설명에 그친다. 인간의 Policy 변경 승인과 한국 실전 단계별 승인은 개발 도구의 응답으로 대체되지 않는다.
+
 ## 2. 목적과 불변 원칙
 
 하나의 플랫폼에서 다음 두 시스템을 운영한다.
@@ -151,6 +153,8 @@ Backtest 성능만으로 실제 자금 투입을 결정하지 않는다. Live-ma
 - 가상·실제 계좌가 공통 Domain을 사용하되 execution mode와 계좌 식별은 명시적으로 분리한다.
 - FastAPI와 Streamlit은 실제 필요성이 생기기 전까지 추가하지 않는다.
 
+현재 라이브러리 API와 테스트는 계좌·거래 저장 및 현재 USD 계좌 분석을 제공하지만, 실제 계좌 자료를 안전하게 입력·대사하는 사용자 경로, 결과를 전달하는 화면·보고서, 운영 스케줄·감시·백업은 아직 제공하지 않는다. 미국 자산 상태를 실제로 사용할 수 있으려면 입력 주체와 형식, 중복·정정·대사 규칙, 가격·FX 사용 권리와 freshness, 출처·시각·누락을 표시하는 최소 보고 경로를 정하고 검증해야 한다. 이 연결 계획은 ROADMAP의 M1에 추적한다. 계좌 식별 및 자료 반입 방식은 아래 Open Decisions에서 정한다.
+
 Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_positions`, `get_orders`, `place_order`, `cancel_order`다. 인자·반환값·동기/비동기 계약은 아직 결정하지 않는다.
 
 구현 예시는 MockBroker, PaperBroker, KoreanBroker, USBroker다. MockBroker는 테스트 대역, PaperBroker는 가상 체결, 나머지는 외부 제공자 adapter를 뜻한다. 공통 인터페이스가 있다고 모든 포트폴리오에 주문 권한이 생기는 것은 아니다. `US_REAL`은 조회·반영만 허용하며 자동 주문 대상이 아니다. Phase 0에 Broker 인터페이스나 구현 클래스를 만들지 않는다.
@@ -217,6 +221,8 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 | OD-10 | Backtest 전략·universe·검증 구간·재현 규칙·과적합 통제, 데이터 불완전 시 실험 제외 기준 | Phase 9 |
 | OD-11 | Dashboard 기술, Daily/Weekly Report 전달 수단·일정·Scheduler 필요성 | Phase 11 |
 | OD-12 | 의존성 lock·재현 가능한 개발 환경 및 CI·지원 Python 버전 조합 | 후속 개발 환경 확장 시 |
+| OD-13 | 실제 미국 계좌 거래·보유 자료의 입력 방식, 계좌 식별·정정·중복·대사 및 누락 처리, 사용자에게 전달할 최소 보고 형식·채널·주기 | M1 연결 설계; Phase 4 완료 조건을 낮추지 않음 |
+| OD-14 | 한국 Broker 후보(Toss 포함)의 실제 API·조회/모의/주문 capability, 인증·약관·데이터 권리, 거래 주기와 운영 가능 시간 | Phase 8–12 설계; 실주문은 Phase 13 승인 후 |
 
 ## 16. Phase 0 완료 기준
 
