@@ -1,12 +1,12 @@
 # Development Roadmap
 
-[PROJECT_SPEC.md](../PROJECT_SPEC.md)가 authoritative specification이다. 이 문서는 그 로드맵을 구현 범위와 완료 조건으로 구체화한다. **Phase 0과 Phase 1은 완료**, 다음 단계는 Phase 2 Market Data다. 단계 완료는 자동 자금 투입 승인을 뜻하지 않는다.
+[PROJECT_SPEC.md](../PROJECT_SPEC.md)가 authoritative specification이다. 이 문서는 그 로드맵을 구현 범위와 완료 조건으로 구체화한다. **Phase 0~2는 완료**, 다음 단계는 Phase 3 US Portfolio Analytics다. 단계 완료는 자동 자금 투입 승인을 뜻하지 않는다.
 
 | Phase | 주제 | 권장 범위와 완료 조건 |
 | --- | --- | --- |
 | 0 | Project Bootstrap / Architecture | 완료. 최소 패키지·설정 선언·핵심 문서·pytest 환경 |
 | 1 | Portfolio Foundation | 완료. 공통 포트폴리오·계좌·자산과 Ledger 재생, Decimal 계산·수동 가격 평가, SQLite 저장·재조회 및 테스트 |
-| 2 | Market Data | Provider 계약과 가격·FX 정규화, 출처·기준 시점·오래된 데이터·오류 처리 검증 |
+| 2 | Market Data | 완료. Provider 계약과 Twelve Data 가격·FX 정규화, 출처·시각·stale 판정·오류 격리의 오프라인 검증 |
 | 3 | US Portfolio Analytics | 평가·손익·비중·현금·Sector·FX 노출과 성과 지표. Benchmark와 계산 기준 결정 및 검증 |
 | 4 | US Portfolio Policy | 인간 소유 설정 loader/validator, 범위·집중도·Risk 평가. Policy 변경 이력·권한·경계값 검증 |
 | 5 | US Shadow Engine | POLICY/AI Shadow의 독립 가상 상태·체결과 Benchmark 비교. 현금흐름·비용·판단 시점 일관성 검증 |

@@ -1,6 +1,6 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation이며, AI·Market Data·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation과 Market Data 정규화다. AI·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
 
 ## 1. 공통 Domain과 의존성
 
@@ -20,7 +20,7 @@ flowchart LR
 
 ## 2. 논리적 모듈
 
-아래는 책임 지도다. Phase 1에 필요한 `domain`, `portfolio`, `storage`만 구현했으며 나머지는 실제 책임이 생길 때 만든다.
+아래는 책임 지도다. Phase 1의 `domain`, `portfolio`, `storage`와 Phase 2의 `market`을 구현했으며 나머지는 실제 책임이 생길 때 만든다.
 
 | 모듈 | 책임 | 경계 |
 | --- | --- | --- |
@@ -37,6 +37,14 @@ flowchart LR
 | `reports` | 검증된 데이터와 AI 설명의 보고서 구성 | 수치를 독자적으로 재계산하지 않음 |
 
 논리적 모듈 하나에 Domain 로직과 adapter가 모두 생기면 파일 수준으로 먼저 분리한다. 필요가 확인되기 전에 다층 패키지나 프레임워크를 추가하지 않는다. Backtest와 Shadow Engine의 구체적 패키지 배치는 각각 Phase 9와 Phase 5에서 결정한다.
+
+### Phase 2 Market Data 경계
+
+`market.provider.MarketDataProvider`는 Asset 목록에서 asset_id별 `MarketQuote`를, 통화 방향에서 `FxQuote`를 얻는 계약이다. 내부 quote 타입과 순수 신선도 판정은 `market.models`, 공통 오류는 `market.errors`, Twelve Data HTTP·응답 파싱과 명시적 asset_id→symbol/exchange resolver는 `market.twelve_data`에 둔다. 다른 provider도 내부 타입과 계약을 따를 수 있다. 첫 adapter는 미국 USD 주식·ETF 가격과 FX를 조회하며 한국 가격 adapter는 없다. 표준 라이브러리 `urllib`에 명시적 timeout과 주입 가능한 HTTP 함수를 사용하므로 추가 runtime dependency 없이 네트워크 없는 adapter 테스트를 수행한다.
+
+Twelve Data `/quote`의 `close`는 가격이며 `last_quote_at`이 있을 때만 시장 시각으로 채택한다. candle-opening `timestamp`는 마지막 가격 시각이 아니다. `/exchange_rate`의 `timestamp`는 환율 시각이다. 출처는 `twelve_data`이고 모든 내부 시간은 UTC다. `as_of=None`이면 최신 가격임을 입증할 수 없으므로 stale다. 호출자가 기준 시각과 `max_age`를 지정하고 투자용 threshold는 아직 정하지 않는다. `FxQuote.rate`는 base 1단위당 quote 통화 단위다. 제공자 오류를 명시적 Market Data 오류로 바꾸며 가상 가격 자동 fallback은 없다.
+
+Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestration에서 quote의 asset_id·통화·신선도·시점을 확인한 뒤 `{asset_id: Decimal}`을 만들어 전달한다. FX를 계좌 평가에 적용하지 않으며 최신 quote cache/과거 가격 history 테이블도 만들지 않는다. 데이터 라이선스, 시세 지연, 수정주가, 상장폐지, point-in-time 보장 및 실제 투자용 freshness 정책은 OD-04에 남긴다.
 
 ## 3. 미국 분석과 네 포트폴리오
 
@@ -174,4 +182,4 @@ Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원�
 - COMMIT을 예외 처리 범위에 포함하고, 중단 예외도 rollback 후 다시 전달한다. `SQLITE_BUSY`로 commit이 실패한 뒤 미완료 INSERT와 잠금이 남는 것을 방지한다. `recursive_triggers`를 켜 REPLACE도 불변 트리거를 거치게 한다.
 - 기존 테스트에 반복 소수 수량 매도·재진입·다중 자산 손익·과도한 매도 수수료·DST 왕복·실제 commit 경합·동시 append를 추가했다. Phase 1 원장과 저장 검증이며, Broker 주문 예약·재시도·대사 검증을 대체하지 않는다.
 
-남은 제한: `SQLiteStore.connection`은 관리·진단용 raw connection을 노출하므로 application은 Repository 계약만 사용해야 한다. 외부 연결이나 직접 SQL로 새 이벤트 삽입·설정 변경을 하는 것은 불변식 보장 범위 밖이다. 전체 replay 기반 append의 장기 성능, 극단적인 숫자 입력의 자릿수·지수 자원 한도, migration·backup 운영은 후속 결정이 필요하다. 가격 mapping에는 아직 currency·기준 시각·출처가 없으므로 Phase 2에서 Asset ID 해석과 함께 검증 계약을 정해야 한다.
+남은 제한: `SQLiteStore.connection`은 관리·진단용 raw connection을 노출하므로 application은 Repository 계약만 사용해야 한다. 외부 연결이나 직접 SQL로 새 이벤트 삽입·설정 변경을 하는 것은 불변식 보장 범위 밖이다. 전체 replay 기반 append의 장기 성능, Ledger 숫자 입력의 자릿수·지수 자원 한도, migration·backup 운영은 후속 결정이 필요하다. Market Quote에는 currency·기준 시각·출처가 있지만 순수 Portfolio 가격 mapping에는 없으므로 Phase 3 orchestration이 quote 검증과 변환을 맡아야 한다.
