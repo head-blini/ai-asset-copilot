@@ -18,7 +18,8 @@ class PolicyStatus(str, Enum):
 
 
 class PolicyKind(str, Enum):
-    SINGLE_ASSET = "SINGLE_ASSET"
+    INDIVIDUAL_STOCK = "INDIVIDUAL_STOCK"
+    TOTAL_STOCK_EXPOSURE = "TOTAL_STOCK_EXPOSURE"
     DIRECT_SECTOR = "DIRECT_SECTOR"
     CASH_RATIO = "CASH_RATIO"
 
@@ -52,8 +53,9 @@ def _ratio(value: Decimal, field: str) -> None:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PortfolioPolicyConfig:
     policy_version: str
-    single_asset_warn_ratio: Decimal
-    single_asset_breach_ratio: Decimal
+    individual_stock_warn_ratio: Decimal
+    individual_stock_breach_ratio: Decimal
+    individual_stocks_total_max_ratio: Decimal
     direct_sector_warn_ratio: Decimal | None
     direct_sector_breach_ratio: Decimal
     min_cash_ratio: Decimal
@@ -62,15 +64,18 @@ class PortfolioPolicyConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.policy_version, str) or not self.policy_version.strip():
             raise ValueError("policy_version must be a nonempty string")
-        for name in ("single_asset_warn_ratio", "single_asset_breach_ratio",
+        for name in ("individual_stock_warn_ratio", "individual_stock_breach_ratio",
+                     "individual_stocks_total_max_ratio",
                      "direct_sector_breach_ratio", "min_cash_ratio", "max_cash_ratio"):
             _ratio(getattr(self, name), name)
         if self.direct_sector_warn_ratio is not None:
             _ratio(self.direct_sector_warn_ratio, "direct_sector_warn_ratio")
             if self.direct_sector_warn_ratio > self.direct_sector_breach_ratio:
                 raise ValueError("direct sector warning exceeds breach")
-        if self.single_asset_warn_ratio > self.single_asset_breach_ratio:
-            raise ValueError("single asset warning exceeds breach")
+        if self.individual_stock_warn_ratio > self.individual_stock_breach_ratio:
+            raise ValueError("individual stock warning exceeds breach")
+        if self.individual_stock_breach_ratio > self.individual_stocks_total_max_ratio:
+            raise ValueError("individual stock breach exceeds total stock limit")
         if self.min_cash_ratio > self.max_cash_ratio:
             raise ValueError("minimum cash exceeds maximum cash")
 

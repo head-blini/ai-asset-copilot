@@ -72,9 +72,9 @@ Ledger → replay → Market Data 검증 → USPortfolioAnalyzer
 
 `domain/policy.py`는 frozen 설정·대상·한도·평가·보고서 모델과 PASS/WARN/BREACH/UNKNOWN 상태를 정의한다. `application/policy_config.py`는 인간 소유 TOML의 percentage points를 Decimal ratio로 읽고 allocation 합계, range, 위험 한도를 검증한다. `application/us_portfolio_policy.py`는 `PortfolioAnalysis`와 주입된 `PortfolioPolicyConfig`만 받아 판정한다. Repository, Provider, Ledger, clock 참조가 없다. Policy 설정 파일에 없는 Sector warning 수치는 만들지 않는다.
 
-개별 자산은 asset_id별 STOCK/ETF 직접 보유 평가액, Direct Sector는 분류된 STOCK의 평가액만 사용한다. ETF Sector label은 Direct Sector나 look-through 정보가 아니다. 미분류 STOCK은 별도의 typed 대상과 `UNKNOWN` 상태로 보존한다. 현금을 포함한 USD 총가치를 분모로 사용하며, Decimal 평가액을 `threshold × total_value_usd`와 비교하므로 표시용 rounding과 순환소수 비율의 근사치가 판정을 바꾸지 않는다. Concentration warn/breach는 이상, Cash Range 경계는 포함이다.
+`INDIVIDUAL_STOCK`은 asset_id별 STOCK 직접 보유 평가액만 평가한다. ETF에 individual_position_max를 적용하지 않는다. `TOTAL_STOCK_EXPOSURE`는 분류 여부에 관계없이 STOCK 평가액을 정확히 합산하고, stock_exposure의 가용성을 확인해 설정의 전체 STOCK 한도를 적용한다. Direct Sector는 분류된 STOCK의 평가액만 사용한다. ETF Sector label은 Direct Sector나 look-through 정보가 아니다. 미분류 STOCK은 별도의 typed 대상과 `UNKNOWN` 상태로 보존한다. 현금을 포함한 USD 총가치를 분모로 사용하며, Decimal 평가액을 `threshold × total_value_usd`와 비교하므로 표시용 rounding과 순환소수 비율의 근사치가 판정을 바꾸지 않는다. Concentration warn/breach는 이상, Cash Range 경계는 포함이다.
 
-Phase 3는 stale quote/FX를 분석 생성 전에 거부한다. Policy Engine은 재조회·시장 시간 계산을 하지 않으며, 전달된 freshness 플래그가 거짓이면 `UNKNOWN`으로 평가한다. 빈 계좌의 0 총가치에서는 Cash Ratio가 `UNKNOWN`, 존재하지 않는 자산·Sector 정책은 `not_applicable`이다. 현금만 있는 계좌는 Cash Range만 평가한다. 보고서의 policy_version과 이유 코드·타입 대상·실제값·한도는 이후 AI 설명 계층의 읽기 전용 입력이 될 수 있다. 이는 주문 승인이나 리밸런싱 명령이 아니다.
+Phase 3는 stale quote/FX를 분석 생성 전에 거부한다. Policy Engine은 재조회·시장 시간 계산을 하지 않으며, 전달된 freshness 플래그가 거짓이면 `UNKNOWN`으로 평가한다. 빈 계좌의 0 총가치에서는 Cash Ratio와 전체 STOCK 비율이 `UNKNOWN`, 존재하지 않는 개별 STOCK·Sector 정책은 `not_applicable`이다. 양의 현금만 있거나 ETF만 있는 계좌에서는 Cash Range 및 전체 STOCK 비율 0을 평가한다. 보고서의 policy_version과 이유 코드·타입 대상·실제값·한도는 이후 AI 설명 계층의 읽기 전용 입력이 될 수 있다. 이는 주문 승인이나 리밸런싱 명령이 아니다.
 
 ## 3. 미국 분석과 네 포트폴리오
 
@@ -106,7 +106,7 @@ flowchart TD
 
 ## 4. 인간 Policy와 AI 경계
 
-Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고, evaluator는 현재 보유 자산 집중도·직접 Sector 집중도·Cash Range만 판정한다. Core/Growth ETF Target Range 및 전체 STOCK 한도의 누락은 Phase 4 OPEN 항목이다. 변경 이력·권한·적용 시점도 ROADMAP의 Phase 4 완료 조건에 남으며 후속 Phase로 이관하지 않는다.
+Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고, evaluator는 개별 STOCK 집중도·전체 STOCK 한도·직접 Sector 집중도·Cash Range를 판정한다. Loader는 모든 계층의 키를 확인해 unknown/missing key와 malformed 값을 거부한다. Core/Growth ETF 분류와 전체 allocation Target/Range 평가의 누락은 Phase 4 OPEN 항목이다. 변경 이력·권한·적용 시점도 ROADMAP의 Phase 4 완료 조건에 남으며 후속 Phase로 이관하지 않는다.
 
 향후 application은 인간이 승인한 Policy 버전을 읽어 Risk Engine에 전달한다. AI에는 분석에 필요한 읽기 전용 데이터만 제공하며, Policy 저장소 쓰기 권한과 Broker credentials를 제공하지 않는다. Policy 변경 경로는 AI 제안 경로에서 분리하고 인간의 변경 이력과 적용 시점을 남긴다. 이를 강제하는 구체적 권한 구조는 OD-02에서 결정한다.
 

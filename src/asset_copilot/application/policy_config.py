@@ -14,6 +14,15 @@ ONE = Decimal("1")
 HUNDRED = Decimal("100")
 
 
+def _keys(data: dict, required: set[str], *, path: str,
+          optional: frozenset[str] = frozenset()) -> None:
+    missing = required - data.keys()
+    unknown = data.keys() - required - optional
+    if missing or unknown:
+        raise ValueError(f"invalid policy schema at {path}: "
+                         f"missing keys {sorted(missing)}, unknown keys {sorted(unknown)}")
+
+
 def _table(data: dict, name: str) -> dict:
     value = data.get(name)
     if not isinstance(value, dict):
@@ -32,18 +41,29 @@ def _percent(data: dict, name: str) -> Decimal:
 
 
 def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
-    """Load the declared percentage-point policy; no implicit path or defaults."""
+    """Load the closed percentage-point schema; reject unrecognized keys at every level.
+
+    Allocation targets/ranges are validated here, but full allocation evaluation
+    and policy change authorization remain open Phase 4 acceptance criteria.
+    """
     with Path(path).open("rb") as source:
         data = tomllib.load(source, parse_float=Decimal)
     if not isinstance(data, dict):
         raise ValueError("policy must be a TOML table")
+    _keys(data, {"policy_version", "target_percent", "range_percent", "risk_percent"}, path="root")
     targets = _table(data, "target_percent")
     ranges = _table(data, "range_percent")
     risk = _table(data, "risk_percent")
+    _keys(targets, set(_BUCKETS), path="target_percent")
+    _keys(ranges, set(_BUCKETS), path="range_percent")
+    _keys(risk, {"individual_position_max", "concentration_warning", "sector_max",
+                 "individual_stocks_total_max"}, path="risk_percent",
+          optional=frozenset({"sector_warning"}))
     total_target = ZERO
     for bucket in _BUCKETS:
         target = _percent(targets, bucket)
         band = _table(ranges, bucket)
+        _keys(band, {"min", "max"}, path=f"range_percent.{bucket}")
         minimum, maximum = _percent(band, "min"), _percent(band, "max")
         if not minimum <= target <= maximum:
             raise ValueError(f"{bucket} target must lie within its range")
@@ -51,9 +71,9 @@ def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
     if total_target != ONE:
         raise ValueError("allocation targets must sum to 100 percent")
 
-    single_breach = _percent(risk, "individual_position_max")
+    stock_breach = _percent(risk, "individual_position_max")
     stock_total_max = _percent(risk, "individual_stocks_total_max")
-    if single_breach > stock_total_max:
+    if stock_breach > stock_total_max:
         raise ValueError("individual position max exceeds individual stocks total max")
     if _percent(targets, "individual_stocks") > stock_total_max:
         raise ValueError("individual stocks target exceeds its total max")
@@ -61,8 +81,9 @@ def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
                    if "sector_warning" in risk else None)
     return PortfolioPolicyConfig(
         policy_version=data.get("policy_version"),
-        single_asset_warn_ratio=_percent(risk, "concentration_warning"),
-        single_asset_breach_ratio=single_breach,
+        individual_stock_warn_ratio=_percent(risk, "concentration_warning"),
+        individual_stock_breach_ratio=stock_breach,
+        individual_stocks_total_max_ratio=stock_total_max,
         direct_sector_warn_ratio=sector_warn,
         direct_sector_breach_ratio=_percent(risk, "sector_max"),
         min_cash_ratio=_percent(_table(ranges, "cash"), "min"),
