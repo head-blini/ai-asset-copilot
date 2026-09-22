@@ -1,6 +1,6 @@
 """Hand-calculated examples for account ledger replay and manual valuation."""
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN, ROUND_UP, localcontext
 
@@ -147,17 +147,35 @@ def test_ordering_is_by_sequence_even_at_identical_timestamp() -> None:
     assert replay(account(), [deposit, buy], {"voo": asset()}) == expected
     with pytest.raises(ValueError, match="contiguous"):
         replay(account(), [deposit, event(3, TransactionType.DEPOSIT, amount=D("1"))], {})
-    with pytest.raises(ValueError, match="precede"):
-        replay(account(), [deposit, Transaction(id="late", account_id="acct-us", sequence=2,
-               transaction_type=TransactionType.DEPOSIT, currency=Currency.USD,
-               executed_at=AT - timedelta(seconds=1), amount=D("1"))], {})
+    backfill = replace(event(3, TransactionType.DEPOSIT, amount=D("25")),
+                       executed_at=AT - timedelta(days=1))
+    assert replay(account(), [buy, backfill, deposit], {"voo": asset()}).cash_balance == D("85")
+
+
+def test_effective_time_precedes_sequence_when_computing_cost_basis_and_pnl() -> None:
+    sep10 = datetime(2026, 9, 10, tzinfo=timezone.utc)
+    sep15 = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    sep18 = datetime(2026, 9, 18, tzinfo=timezone.utc)
+    sep20 = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    sep21 = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    ledger = [
+        replace(event(1, TransactionType.DEPOSIT, amount=D("1000")), executed_at=sep20),
+        replace(event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("100")), executed_at=sep21),
+        replace(event(3, TransactionType.DEPOSIT, amount=D("500")), executed_at=sep10),
+        replace(event(4, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("200")), executed_at=sep15),
+        replace(event(5, TransactionType.SELL, asset_id="voo", quantity=D("1"), price=D("250")), executed_at=sep18),
+    ]
+    snapshot = replay(account(), ledger, {"voo": asset()})
+    assert snapshot.cash_balance == D("1450")
+    assert snapshot.positions[0].cost_basis == D("100")
+    assert snapshot.realized_pnl == D("50")
 
 
 def test_manual_prices_produce_market_value_unrealized_pnl_weights_and_cash_ratio() -> None:
     events = [event(1, TransactionType.DEPOSIT, amount=D("700")),
               event(2, TransactionType.BUY, asset_id="voo", quantity=D("2"), price=D("100"))]
     snapshot = replay(account(), events, {"voo": asset()})
-    valuation = value_at_prices(snapshot, {"VOO": D("150")})
+    valuation = value_at_prices(snapshot, {"voo": D("150")})
     assert valuation.positions[0].market_value == D("300")
     assert valuation.positions[0].unrealized_pnl == D("100")
     assert valuation.unrealized_pnl == D("100")
@@ -175,16 +193,29 @@ def test_zero_value_and_missing_or_invalid_manual_prices() -> None:
     funded = replay(account(), [event(1, TransactionType.DEPOSIT, amount=D("10")),
                                 event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("5"))],
                     {"voo": asset()})
-    with pytest.raises(ValueError, match="exactly"):
+    with pytest.raises(ValueError, match="missing prices for asset_id: voo"):
         value_at_prices(funded, {})
     with pytest.raises(ValueError, match="positive finite Decimal"):
-        value_at_prices(funded, {"VOO": D("0")})
-    with pytest.raises(ValueError, match="ambiguous ticker"):
-        duplicate = replay(account(), [event(1, TransactionType.DEPOSIT, amount=D("20")),
-                     event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("5")),
-                     event(3, TransactionType.BUY, asset_id="other", quantity=D("1"), price=D("5"))],
-                     {"voo": asset(), "other": asset("other", "VOO")})
-        value_at_prices(duplicate, {"VOO": D("10")})
+        value_at_prices(funded, {"voo": D("0")})
+    with pytest.raises(ValueError, match="positive finite Decimal"):
+        value_at_prices(funded, {"voo": D("NaN")})
+    with pytest.raises(ValueError, match="positive finite Decimal"):
+        value_at_prices(funded, {"voo": 5.0})
+
+
+def test_same_ticker_different_asset_ids_and_extra_batch_price() -> None:
+    snapshot = replay(account(), [event(1, TransactionType.DEPOSIT, amount=D("100")),
+                 event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("10")),
+                 event(3, TransactionType.BUY, asset_id="other", quantity=D("1"), price=D("20"))],
+                 {"voo": asset(), "other": asset("other", "VOO")})
+    valuation = value_at_prices(snapshot, {"voo": D("15"), "other": D("30"), "unused": D("999")})
+    assert {position.position.asset_id: position.market_value for position in valuation.positions} == {
+        "voo": D("15"), "other": D("30")}
+    assert valuation.unrealized_pnl == D("15")
+    assert valuation.total_account_value == D("115")
+    assert valuation.cash_ratio is not None
+    with pytest.raises(ValueError, match="missing prices for asset_id: other"):
+        value_at_prices(snapshot, {"voo": D("15"), "unused": D("999")})
 
 
 @pytest.mark.parametrize("kind,fields", [

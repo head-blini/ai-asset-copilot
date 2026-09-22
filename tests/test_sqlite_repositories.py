@@ -83,6 +83,57 @@ def test_account_ledgers_are_isolated_and_replay_after_reopen(tmp_path) -> None:
                       {security.id: asset_after}) == shadow_before
 
 
+def test_valid_historical_backfill_replays_by_time_after_sqlite_reopen(tmp_path) -> None:
+    path = tmp_path / "backfill.sqlite"
+    sep10 = datetime(2026, 9, 10, tzinfo=timezone.utc)
+    sep20 = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    sep21 = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    with SQLiteStore(path) as store:
+        real, _, security = setup_store(store)
+        store.transactions.append(replace(tx("sep20-deposit", real.id, 1, TransactionType.DEPOSIT,
+                                             amount=D("100")), executed_at=sep20))
+        store.transactions.append(replace(tx("sep21-buy", real.id, 2, TransactionType.BUY,
+                                             asset_id=security.id, quantity=D("1"), price=D("60")),
+                                          executed_at=sep21))
+        store.transactions.append(replace(tx("sep10-deposit", real.id, 3, TransactionType.DEPOSIT,
+                                             amount=D("25")), executed_at=sep10))
+        ledger = store.transactions.list_for_account(real.id)
+        assert [event.id for event in ledger] == ["sep20-deposit", "sep21-buy", "sep10-deposit"]
+        before = replay(real, ledger, {security.id: security})
+        assert before.cash_balance == D("65")
+        assert before.positions[0].cost_basis == D("60")
+
+    with SQLiteStore(path) as store:
+        assert store.transactions.list_for_account(real.id) == ledger
+        assert replay(store.accounts.get(real.id), store.transactions.list_for_account(real.id),
+                      {security.id: store.assets.get(security.id)}) == before
+
+
+def test_invalid_backfill_rolls_back_entire_ledger(tmp_path) -> None:
+    sep10 = datetime(2026, 9, 10, tzinfo=timezone.utc)
+    sep15 = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    sep20 = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    with SQLiteStore(tmp_path / "backfill.sqlite") as store:
+        real, _, security = setup_store(store)
+        store.transactions.append(replace(tx("opening", real.id, 1, TransactionType.DEPOSIT,
+                                             amount=D("100")), executed_at=sep10))
+        store.transactions.append(replace(tx("existing-buy", real.id, 2, TransactionType.BUY,
+                                             asset_id=security.id, quantity=D("1"), price=D("80")),
+                                          executed_at=sep20))
+        before = store.transactions.list_for_account(real.id)
+        # The withdrawal itself is affordable on Sep 15; the Sep 20 buy becomes invalid.
+        with pytest.raises(ValueError, match="insufficient cash"):
+            store.transactions.append(replace(tx("late-withdraw", real.id, 3, TransactionType.WITHDRAW,
+                                                 amount=D("50")), executed_at=sep15))
+        assert store.transactions.list_for_account(real.id) == before
+        with pytest.raises(ValueError, match="cannot sell"):
+            store.transactions.append(replace(tx("early-sell", real.id, 3, TransactionType.SELL,
+                                                 asset_id=security.id, quantity=D("1"), price=D("90")),
+                                              executed_at=sep15))
+        assert store.transactions.list_for_account(real.id) == before
+        assert replay(real, before, {security.id: security}).cash_balance == D("20")
+
+
 def test_decimal_text_round_trip_preserves_exponents_and_long_fraction(tmp_path) -> None:
     path = tmp_path / "precision.sqlite"
     deposit_amount = D("1.000000000000000000000000000000000001")

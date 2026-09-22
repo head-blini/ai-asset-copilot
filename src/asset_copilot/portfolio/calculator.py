@@ -82,26 +82,25 @@ def replay(
     transactions: Iterable[Transaction],
     assets: Mapping[str, Asset],
 ) -> AccountSnapshot:
-    """Replay one account by contiguous sequence; reject invalid ledger history."""
+    """Validate ledger identity, then replay by financial event time."""
     cash = ZERO
     realized = ZERO
     holdings: dict[str, tuple[Decimal, Decimal]] = {}
     seen_ids: set[str] = set()
-    previous_time = None
 
-    for expected_sequence, event in enumerate(sorted(transactions, key=lambda item: item.sequence), 1):
+    ledger = sorted(transactions, key=lambda item: item.sequence)
+    for expected_sequence, event in enumerate(ledger, 1):
         if event.sequence != expected_sequence:
             raise ValueError("account ledger sequence must start at 1 and be contiguous")
         if event.id in seen_ids:
             raise ValueError("duplicate transaction id in ledger")
         seen_ids.add(event.id)
+
+    for event in sorted(ledger, key=lambda item: (item.executed_at, item.sequence)):
         if event.account_id != account.id:
             raise ValueError("transaction belongs to another account")
         if event.currency is not account.currency:
             raise ValueError("transaction currency differs from account currency")
-        if previous_time is not None and event.executed_at < previous_time:
-            raise ValueError("executed_at must not precede an earlier sequence")
-        previous_time = event.executed_at
 
         asset = None
         if event.asset_id is not None:
@@ -153,18 +152,16 @@ def replay(
 
 
 def value_at_prices(snapshot: AccountSnapshot, prices: Mapping[str, Decimal]) -> AccountValuation:
-    """Value every open position from an explicit ticker-to-price mapping."""
-    expected = {position.ticker for position in snapshot.positions}
-    if len(expected) != len(snapshot.positions):
-        raise ValueError("ambiguous ticker in account; unique price key is required")
-    if set(prices) != expected:
-        raise ValueError("prices must cover exactly the open position tickers")
+    """Value open positions from an explicit asset-id-to-price mapping."""
+    missing = {position.asset_id for position in snapshot.positions} - prices.keys()
+    if missing:
+        raise ValueError(f"missing prices for asset_id: {', '.join(sorted(missing))}")
 
     priced: list[tuple[Position, Decimal, Decimal, Decimal]] = []
     invested_value = ZERO
     unrealized = ZERO
     for position in snapshot.positions:
-        price = prices[position.ticker]
+        price = prices[position.asset_id]
         _valid_price(price)
         market_value = _mul(position.quantity, price)
         position_unrealized = _sub(market_value, position.cost_basis)

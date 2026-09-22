@@ -156,12 +156,12 @@ Phase 0은 설치된 패키지 import와 pytest 실행만 smoke test로 확인�
 
 Portfolio는 운용 목적, Account는 Ledger와 잔고의 독립 경계다. Account는 하나의 Portfolio에 연결되며 Portfolio 하나에 Account 여러 개를 만들 수 있다. 계좌 간 거래·현금·포지션을 합쳐 재생하지 않는다. `AccountType`은 상태 구분용이고 Phase 1 계산에 계좌별 특례를 만들지 않는다.
 
-`Transaction`은 frozen Domain record다. 계좌별 양의 연속 `sequence`가 authoritative replay 순서다. `executed_at`은 시간대가 있어야 하고 sequence가 진행될수록 이전 시각으로 돌아갈 수 없다. 같은 시각의 여러 이벤트는 sequence로 구분한다. 거래는 한 통화·한 계좌·선택적인 한 자산에 속한다. Domain의 `replay` 함수는 임의 순서로 전달된 이벤트를 sequence로 정렬하고, 누락·중복·통화 불일치·잔고 부족·초과 매도를 거부한다.
+`Transaction`은 frozen Domain record다. 계좌별 양의 연속 `sequence`는 안정적인 기록 순번이며 동일한 `executed_at`의 tie-breaker다. 시간대가 있는 `executed_at`은 금융 이벤트의 발생 시각이다. Domain의 `replay` 함수는 먼저 sequence의 완전성·유일성을 검증하고, 그다음 `(executed_at ASC, sequence ASC)` 순으로 Accounting 상태를 계산한다. 뒤늦게 발견된 과거 거래도 다음 sequence로 기록할 수 있다. 전체 이력의 어느 시점에서든 현금 부족·초과 매도·통화 불일치 등이 생기면 추가를 거부한다. 거래는 한 통화·한 계좌·선택적인 한 자산에 속한다.
 
-Replay 결과는 불변 `AccountSnapshot`이며 Cash, 현재 Position, 평균 원가, 잔여 Cost Basis, Total Invested Cost, 누적 Realized PnL을 포함한다. 수동 가격 mapping을 넣는 별도 함수가 시장가치·Unrealized PnL·총가치·Position Weight·Cash Ratio를 계산한다. Snapshot을 authoritative 저장 상태로 쓰지 않는다. 모든 열린 Position의 ticker 가격이 있어야 하며 ticker가 한 계좌 안에서 중복되면 모호한 가격 입력을 거부한다.
+Replay 결과는 불변 `AccountSnapshot`이며 Cash, 현재 Position, 평균 원가, 잔여 Cost Basis, Total Invested Cost, 누적 Realized PnL을 포함한다. 수동 asset_id→Decimal 가격 mapping을 넣는 별도 함수가 시장가치·Unrealized PnL·총가치·Position Weight·Cash Ratio를 계산한다. Snapshot을 authoritative 저장 상태로 쓰지 않는다. 모든 열린 Position의 asset_id 가격이 필요하고, 추가로 조회된 가격은 무시한다. 같은 ticker를 가진 자산도 ID별로 평가한다. Provider symbol/ticker를 Domain Asset ID로 resolve하는 책임은 Phase 2 Market Data에 둔다.
 
 `domain/repositories.py`는 Portfolio·Account·Asset·Transaction Repository 계약을 정의한다. `storage/sqlite.py`의 adapter는 네 테이블과 계좌별 sequence 유일 제약을 사용한다. Decimal 컬럼은 `TEXT`이고 Python Decimal을 `str()`로 직렬화한 뒤 `Decimal()`로 복원한다. SQLite NUMERIC/REAL affinity로 인한 이진 부동소수 변환을 피한다. 거래 UPDATE/DELETE는 DB 트리거가 거부한다.
 
-`TransactionRepository.append`는 `BEGIN IMMEDIATE`로 쓰기 잠금을 얻은 후 해당 계좌의 기록을 읽고, 새 이벤트까지 Domain replay로 검증하고, 성공하면 INSERT 후 commit한다. 실패 시 rollback한다. 각 연결은 foreign key 검사를 켠다. 별도 연결을 통한 이중 지출도 순서대로 검증한다. 이것은 Phase 1의 단순한 동시성 계약이며 실제 주문 실행·예약·대사는 OD-07 범위다. 직접 DB 접근으로 규칙을 우회하지 않는 것이 application 계약이며, SQLite 파일에 대한 운영 권한 통제는 별도 과제다.
+`TransactionRepository.append`는 `BEGIN IMMEDIATE`로 쓰기 잠금을 얻은 후 해당 계좌의 기록을 읽고, 새 이벤트를 포함한 전체 Ledger를 유효 시각 순으로 Domain replay하여 검증하고, 성공하면 INSERT 후 commit한다. 과거 시점 backfill도 이 검증을 통과하면 저장하며 실패 시 rollback한다. 각 연결은 foreign key 검사를 켠다. 별도 연결을 통한 이중 지출도 순서대로 검증한다. 이것은 Phase 1의 단순한 동시성 계약이며 실제 주문 실행·예약·대사는 OD-07 범위다. 직접 DB 접근으로 규칙을 우회하지 않는 것이 application 계약이며, SQLite 파일에 대한 운영 권한 통제는 별도 과제다.
 
 Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원가는 그 시점 잔여 원가 비율로 배분하고 최종 매도에서는 잔여 원가 전부를 제거한다. Dividend는 원가를 바꾸지 않는다. Cash Asset은 만들지 않았다. Cash는 거래 이벤트에서 파생되는 단일 통화 계좌 상태이고, Asset 테이블은 거래·배당 대상 STOCK/ETF를 표현하기 때문이다. Tax Lot, 기업행사, FX와 외부 가격 시점은 해당 후속 Phase에서 정의한다.

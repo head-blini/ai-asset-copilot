@@ -155,7 +155,7 @@ class SQLiteTransactionRepository:
                 raise ValueError("new transaction sequence must be the next account sequence")
             asset_ids = {event.asset_id for event in history + [transaction] if event.asset_id is not None}
             assets = {asset_id: self._assets.get(asset_id) for asset_id in asset_ids}
-            # replay validates cash, holdings, currencies and event chronology.
+            # replay validates the complete history in financial event-time order.
             replay(account, history + [transaction], assets)
             _write(
                 self._connection,
