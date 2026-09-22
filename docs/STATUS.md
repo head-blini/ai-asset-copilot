@@ -19,7 +19,7 @@ Phase 0–3: **DONE on main**. Phase 4 — **US Portfolio Policy: IN REVIEW / NO
 | main base `0071d2b074be686392348ad6fbeec47d596e90de` in clean R0 worktree before edits | Repository `.venv` Python 3.11.9, pytest 9.1.1; `/Users/DKLEE/Desktop/dk_project/ai-asset-copilot/.venv/bin/python -m pytest` | 133 collected, **133 passed**, 0 failed, 0 skipped, 0.76s | Main Phase 0–3 code only |
 | candidate HEAD `089ee027bbdb03557d83cb081e0acd35694c23fe` in original candidate worktree | Same `.venv`; `.venv/bin/python -m pytest` | 219 collected, **219 passed**, 0 failed, 0 skipped, 0.98s | Candidate only; does not close P4-05/06/07/09 |
 | R0 review worktree on base `0071d2b`, documentation/CI edits, `src/` and `tests/` unchanged; final commit SHA in PR | Same `.venv`; `/Users/DKLEE/Desktop/dk_project/ai-asset-copilot/.venv/bin/python -m pytest` | 133 collected, **133 passed**, 0 failed, 0 skipped, 0.84s | Local result before commit; rerun at committed head for final report |
-| GitHub Actions on R0 PR head | `.github/workflows/tests.yml`: Python 3.11, editable dev install, pytest, pip check | PENDING first PR run | CI pass requires a successful run on the reported head SHA |
+| GitHub Actions PR #1 run [35697243360](https://github.com/head-blini/ai-asset-copilot/actions/runs/35697243360) on `a19bc9a1b30efb1b47c8affba157cb5648a7fccf` | Ubuntu 24.04, Python 3.11.16, pytest 9.1.1; editable dev install, `python -m pytest`, `python -m pip check` | **SUCCESS**: 133 passed, 0 failed/skipped, pip check clean | Evidence for that exact head; later documentation/CI version update needs a fresh run |
 
 No API key, real account, live Broker, or external Market Data call is required by these pytest runs. R0 worktree `.venv/bin/python -m pip check` found no broken requirements; `git diff --check` passed. Document links and phase rows are reviewed before commit. A local passing test is not a CI result.
 
@@ -41,6 +41,6 @@ The M1 input → validation/reconciliation → Ledger → observed prices/FX →
 
 ## R0 next work and blockers
 
-R0: finish documentation/CI verification, push the review branch, create a PR against `main`, inspect its actual CI run on the PR head, and leave it unmerged. Review M1 ordering and input/report dependencies before adopting the proposed sequence adjustment.
+R0 review PR [#1](https://github.com/head-blini/ai-asset-copilot/pull/1) is open against `main` and remains unmerged. Verify the CI run for its latest head after this evidence update, then review M1 ordering and input/report dependencies before adopting the proposed sequence adjustment.
 
 After R0 review/merge, next feature work is a Phase 4 design review and implementation of P4-05/06/07: explicit ETF Core/Growth classification and complete allocation evaluation; immutable policy content/version/effective-time history; enforceable human approval and AI write denial. Preserve the candidate branch history, incorporate merged main through a normal merge, resolve documentation conflicts, rerun tests, and submit a separate Policy PR. Phase 4 remains blocked until P4-09 is met. Do not begin Phase 5 or enable live orders.
