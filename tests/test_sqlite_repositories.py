@@ -1,9 +1,12 @@
 """Persistence, isolation and replay after an SQLite reopen."""
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+from threading import Barrier
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -213,3 +216,103 @@ def test_two_store_connections_cannot_spend_the_same_cash_twice(tmp_path) -> Non
             second.transactions.append(tx("second-buy", real.id, 3, TransactionType.BUY,
                                           asset_id=security.id, quantity=D("1"), price=D("60")))
         assert len(second.transactions.list_for_account(real.id)) == 2
+
+
+def test_commit_busy_rolls_back_and_connection_can_be_reused(tmp_path) -> None:
+    path = tmp_path / "commit-busy.sqlite"
+    with SQLiteStore(path) as store:
+        real, _, _ = setup_store(store)
+        reader = sqlite3.connect(path, isolation_level=None)
+        try:
+            reader.execute("BEGIN")
+            reader.execute("SELECT * FROM transactions").fetchall()
+            store.connection.execute("PRAGMA busy_timeout = 0")
+            deposit = tx("deposit", real.id, 1, TransactionType.DEPOSIT, amount=D("100"))
+            # A rollback-journal reader allows INSERT but prevents COMMIT.
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                store.transactions.append(deposit)
+            assert not store.connection.in_transaction
+            assert store.transactions.list_for_account(real.id) == []
+        finally:
+            reader.rollback()
+            reader.close()
+        store.transactions.append(deposit)
+        assert store.transactions.list_for_account(real.id) == [deposit]
+    with SQLiteStore(path) as store:
+        assert store.transactions.list_for_account(real.id) == [deposit]
+
+
+def test_interrupted_append_releases_transaction(tmp_path, monkeypatch) -> None:
+    import asset_copilot.storage.sqlite as adapter
+
+    def interrupted(*args):
+        raise KeyboardInterrupt
+
+    with SQLiteStore(tmp_path / "interrupt.sqlite") as store:
+        real, _, _ = setup_store(store)
+        monkeypatch.setattr(adapter, "replay", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            store.transactions.append(tx("deposit", real.id, 1, TransactionType.DEPOSIT, amount=D("100")))
+        assert not store.connection.in_transaction
+        assert store.transactions.list_for_account(real.id) == []
+
+
+def test_sqlite_replace_cannot_rewrite_existing_ledger_event(tmp_path) -> None:
+    with SQLiteStore(tmp_path / "immutable.sqlite") as store:
+        real, _, _ = setup_store(store)
+        deposit = tx("deposit", real.id, 1, TransactionType.DEPOSIT, amount=D("100"))
+        store.transactions.append(deposit)
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            store.connection.execute(
+                "INSERT OR REPLACE INTO transactions "
+                "SELECT id, account_id, sequence, transaction_type, currency, executed_at, "
+                "asset_id, quantity, price, fee, '999' FROM transactions WHERE id = 'deposit'"
+            )
+        assert store.transactions.list_for_account(real.id) == [deposit]
+
+
+def test_dst_fold_replay_matches_sqlite_round_trip(tmp_path) -> None:
+    path = tmp_path / "dst.sqlite"
+    zone = ZoneInfo("America/New_York")
+    with SQLiteStore(path) as store:
+        real, _, security = setup_store(store)
+        ledger = [
+            replace(tx("deposit", real.id, 1, TransactionType.DEPOSIT, amount=D("100")),
+                    executed_at=datetime(2025, 11, 2, 1, 45, tzinfo=zone, fold=0)),
+            replace(tx("buy", real.id, 2, TransactionType.BUY, asset_id=security.id,
+                       quantity=D("1"), price=D("60")),
+                    executed_at=datetime(2025, 11, 2, 1, 30, tzinfo=zone, fold=1)),
+        ]
+        before = replay(real, ledger, {security.id: security})
+        assert before.cash_balance == D("40")
+        for transaction in ledger:
+            store.transactions.append(transaction)
+    with SQLiteStore(path) as store:
+        assert replay(store.accounts.get(real.id), store.transactions.list_for_account(real.id),
+                      {security.id: store.assets.get(security.id)}) == before
+
+
+def test_simultaneous_connections_cannot_both_append_next_sequence(tmp_path) -> None:
+    path = tmp_path / "concurrent.sqlite"
+    with SQLiteStore(path) as store:
+        real, _, _ = setup_store(store)
+        store.transactions.append(tx("deposit", real.id, 1, TransactionType.DEPOSIT, amount=D("100")))
+    ready = Barrier(2)
+
+    def withdraw(transaction_id: str) -> str:
+        with SQLiteStore(path) as store:
+            ready.wait(timeout=5)
+            try:
+                store.transactions.append(tx(transaction_id, real.id, 2, TransactionType.WITHDRAW, amount=D("80")))
+            except ValueError as error:
+                assert "next account sequence" in str(error)
+                return "rejected"
+            return "committed"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(withdraw, ["first", "second"]))
+    assert sorted(outcomes) == ["committed", "rejected"]
+    with SQLiteStore(path) as store:
+        ledger = store.transactions.list_for_account(real.id)
+        assert len(ledger) == 2
+        assert replay(real, ledger, {}).cash_balance == D("20")

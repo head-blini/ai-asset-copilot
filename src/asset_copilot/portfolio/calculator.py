@@ -1,7 +1,11 @@
 """Derive account state exclusively from ordered transaction events."""
 
 from dataclasses import dataclass
-from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
+from datetime import timezone
+from decimal import (
+    Context, Decimal, DivisionByZero, InvalidOperation, MAX_EMAX, MIN_EMIN,
+    Overflow, ROUND_HALF_EVEN, Underflow, localcontext,
+)
 from typing import Iterable, Mapping
 
 from asset_copilot.domain.models import Account, Asset, Currency, Transaction, TransactionType
@@ -15,23 +19,35 @@ def _precision(*values: Decimal) -> int:
     return max(80, sum(len(v.as_tuple().digits) + abs(v.as_tuple().exponent) for v in values) + 16)
 
 
+def _context(precision: int) -> Context:
+    """Specify every setting so mutable DefaultContext cannot affect accounting."""
+    return Context(prec=precision, rounding=ROUND_HALF_EVEN, Emin=MIN_EMIN, Emax=MAX_EMAX,
+                   capitals=1, clamp=0, flags=[],
+                   traps=[InvalidOperation, DivisionByZero, Overflow, Underflow])
+
+
 def _add(left: Decimal, right: Decimal) -> Decimal:
-    with localcontext(Context(prec=_precision(left, right), rounding=ROUND_HALF_EVEN)):
+    with localcontext(_context(_precision(left, right))):
         return left + right
 
 
 def _sub(left: Decimal, right: Decimal) -> Decimal:
-    with localcontext(Context(prec=_precision(left, right), rounding=ROUND_HALF_EVEN)):
+    with localcontext(_context(_precision(left, right))):
         return left - right
 
 
 def _mul(left: Decimal, right: Decimal) -> Decimal:
-    with localcontext(Context(prec=_precision(left, right), rounding=ROUND_HALF_EVEN)):
+    with localcontext(_context(_precision(left, right))):
         return left * right
 
 
 def _div(left: Decimal, right: Decimal) -> Decimal:
-    with localcontext(Context(prec=_precision(left, right), rounding=ROUND_HALF_EVEN)):
+    # Decimal exponents shift the decimal point, not the required significant digits.
+    # A terminating reduced denominator has only factors 2 and 5. Four times its
+    # coefficient digit count safely covers their powers and the exact quotient.
+    # Counting fractional exponents again would double precision on repeated sells.
+    precision = max(80, len(left.as_tuple().digits) + 4 * len(right.as_tuple().digits))
+    with localcontext(_context(precision)):
         return left / right
 
 
@@ -96,7 +112,7 @@ def replay(
             raise ValueError("duplicate transaction id in ledger")
         seen_ids.add(event.id)
 
-    for event in sorted(ledger, key=lambda item: (item.executed_at, item.sequence)):
+    for event in sorted(ledger, key=lambda item: (item.executed_at.astimezone(timezone.utc), item.sequence)):
         if event.account_id != account.id:
             raise ValueError("transaction belongs to another account")
         if event.currency is not account.currency:
@@ -107,6 +123,8 @@ def replay(
             asset = assets.get(event.asset_id)
             if asset is None:
                 raise ValueError("transaction asset is unknown")
+            if asset.id != event.asset_id:
+                raise ValueError("asset mapping key differs from asset id")
             if asset.currency is not account.currency:
                 raise ValueError("asset currency differs from account currency")
 

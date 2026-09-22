@@ -168,11 +168,11 @@ class SQLiteTransactionRepository:
                  None if transaction.price is None else str(transaction.price),
                  str(transaction.fee), None if transaction.amount is None else str(transaction.amount)),
             )
-        except Exception:
+            self._connection.commit()
+        except BaseException:
+            # COMMIT can fail (for example SQLITE_BUSY); cancellation also needs cleanup.
             self._connection.rollback()
             raise
-        else:
-            self._connection.commit()
 
 
 class SQLiteStore:
@@ -182,6 +182,8 @@ class SQLiteStore:
         self.connection = sqlite3.connect(str(path), isolation_level=None)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
+        # REPLACE performs a DELETE; it must fire the ledger's immutability trigger.
+        self.connection.execute("PRAGMA recursive_triggers = ON")
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, 1):
             self.connection.close()

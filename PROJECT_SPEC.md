@@ -234,10 +234,12 @@ Portfolio는 운용 목적 또는 전략 단위이며 `id`, `name`만 가진다.
 
 현금 이벤트에는 양수 `amount`를 사용한다. `DEPOSIT`과 `WITHDRAW`는 자산 없이 기록하며 `DIVIDEND`는 지급 자산 ID를 요구하고 원가를 바꾸지 않는다. 거래에는 양수 Decimal `quantity`와 `price`, 음수가 아닌 Decimal `fee`를 쓴다. BUY에 필요한 현금은 `quantity × price + fee`이며 수수료를 취득 원가에 포함한다. SELL은 보유량을 초과할 수 없고, 당시 이동 평균 원가로 처분 원가를 배분한다. 실현손익은 `매도금액 − 처분 원가 − 매도 수수료`다. 전량 매도하면 수량·잔여 원가를 정확히 0으로 정리한다. 입금 없이 초기 잔고를 생성하지 않는다. 따라서 `KR_PAPER`의 선언된 10,000,000 KRW도 향후 실제 사용 시에는 `DEPOSIT` 이벤트로 기록해야 한다.
 
-금액·가격·수량·원가·손익은 모두 Decimal이다. SQLite에는 소수 값을 `TEXT`로 직렬화해 부동소수 변환 없이 왕복한다. 덧셈·곱셈은 입력 자릿수에 맞는 충분한 정밀도로 처리하고, 나눗셈 결과가 무한 소수일 때는 최소 80 유효숫자와 `ROUND_HALF_EVEN`을 사용한다. 이 내부 나눗셈 경계는 cents 반올림이나 세금 규칙이 아니다. 부분 매도 후 남은 원가는 이전 원가에서 배분 원가를 뺀 값으로 유지한다. 외부 Decimal context와 무관하게 재생 결과가 같다.
+금액·가격·수량·원가·손익은 모두 Decimal이다. SQLite에는 소수 값을 `TEXT`로 직렬화해 부동소수 변환 없이 왕복한다. 덧셈·곱셈은 입력 자릿수에 맞는 충분한 정밀도로 처리한다. 나눗셈은 유한소수 결과를 보존할 수 있는 계수 자릿수 기준을 사용하며, 무한소수일 때 최소 80 유효숫자와 `ROUND_HALF_EVEN`을 사용한다. 반복 부분 매도의 소수 지수를 유효숫자로 다시 더해 정밀도가 지수적으로 증가하지 않도록 한다. 이 내부 나눗셈 경계는 cents 반올림이나 세금 규칙이 아니다. 부분 매도 후 남은 원가는 이전 원가에서 배분 원가를 뺀 값으로 유지한다. 현재 context뿐 아니라 mutable `DefaultContext`의 변경도 계산에 영향을 주지 않는다. 표현 범위를 벗어나면 Overflow/Underflow를 조용히 허용하지 않는다.
 
 수동 asset_id→Decimal 가격 mapping으로 현재 보유 Position의 시장가치·미실현손익·계좌 총가치·Position Weight·Cash Ratio를 계산한다. 미실현손익은 실현손익과 분리한다. 열린 Position의 asset_id 가격이 빠지면 평가를 거부하며, 추가 가격은 허용한다. Ticker는 표시 정보이며 같은 ticker의 서로 다른 Asset도 각각의 ID로 평가한다. 계좌 총가치가 0이면 Cash Ratio는 정의되지 않아 `None`이다. Provider symbol/ticker를 Domain Asset ID로 연결하는 작업과 가격 데이터의 신선도·시점은 Phase 2에서 다룬다.
 
 Phase 1의 Cost Basis는 **Portfolio Analytics용 이동 가중평균**이다. 미국 세금 신고용 Tax Lot 회계로 간주하지 않는다. FIFO·Specific Identification·Broker statement 기준은 미래 Tax/Lot Engine의 범위다. Asset은 STOCK·ETF만 나타내며 Cash는 별도 자산이 아니라 계좌 Ledger의 파생 상태로 둔다. FX 변환도 수행하지 않고 다른 통화의 거래·자산을 거부한다.
 
 Repository 계약은 Domain 측에 두고 SQLite adapter는 이를 구현한다. 저장소는 새 거래를 계좌별 Ledger와 함께 검증한 뒤 원자적으로 추가한다. 현재 Schema는 최초 버전이며 마이그레이션 도구나 PostgreSQL 구현은 없다. 이 Foundation은 수동으로 기록한 거래를 계산하기 위한 것이며 실제 주문을 실행하지 않는다.
+
+Phase 1 감사 보완: `executed_at` 정렬 시 UTC의 실제 시각을 비교하여 DST 중복 시간의 순서와 저장 전후 재생 결과를 일치시킨다. Asset mapping의 키는 연결된 `Asset.id`와 같아야 한다. SQLite append는 INSERT뿐 아니라 COMMIT 실패와 실행 중단에도 rollback하고, adapter 연결에서는 recursive trigger를 활성화하여 `INSERT OR REPLACE`의 삭제 단계에도 Ledger 불변 트리거가 적용되게 한다.

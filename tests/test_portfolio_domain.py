@@ -2,7 +2,9 @@
 
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_DOWN, ROUND_UP, localcontext
+from decimal import DefaultContext, Decimal, Inexact, ROUND_DOWN, ROUND_UP, localcontext
+from fractions import Fraction
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -207,7 +209,7 @@ def test_same_ticker_different_asset_ids_and_extra_batch_price() -> None:
     snapshot = replay(account(), [event(1, TransactionType.DEPOSIT, amount=D("100")),
                  event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("10")),
                  event(3, TransactionType.BUY, asset_id="other", quantity=D("1"), price=D("20"))],
-                 {"voo": asset(), "other": asset("other", "VOO")})
+                 {"voo": asset(), "other": replace(asset("other", "VOO"), exchange="OTHER")})
     valuation = value_at_prices(snapshot, {"voo": D("15"), "other": D("30"), "unused": D("999")})
     assert {position.position.asset_id: position.market_value for position in valuation.positions} == {
         "voo": D("15"), "other": D("30")}
@@ -274,3 +276,96 @@ def test_nonterminating_average_is_independent_of_caller_rounding() -> None:
     assert first == second
     assert first.positions[0].quantity == D("2")
     assert first.positions[0].cost_basis.quantize(D("0.000001")) == D("2.666667")
+
+
+def test_repeated_fractional_sales_do_not_explode_precision_or_leave_residual_basis() -> None:
+    events = [event(1, TransactionType.DEPOSIT, amount=D("100")),
+              event(2, TransactionType.BUY, asset_id="voo", quantity=D("3"), price=D("1"), fee=D("1"))]
+    for sequence in range(3, 23):
+        events.append(event(sequence, TransactionType.SELL, asset_id="voo", quantity=D("0.01"), price=D("2")))
+        snapshot = replay(account(), events, {"voo": asset()})
+        # Twenty ordinary fills must not generate exponentially many digits.
+        assert len(snapshot.positions[0].cost_basis.as_tuple().digits) < 1000
+    assert snapshot.positions[0].quantity == D("2.80")
+    assert snapshot.positions[0].cost_basis.quantize(D("0.000000000001")) == D("3.733333333333")
+    assert snapshot.realized_pnl.quantize(D("0.000000000001")) == D("0.133333333333")
+    events.append(event(23, TransactionType.SELL, asset_id="voo", quantity=D("2.8"), price=D("2")))
+    liquidated = replay(account(), events, {"voo": asset()})
+    assert liquidated.positions == ()
+    assert liquidated.total_invested_cost == D("0")
+    assert liquidated.cash_balance == D("102")
+    assert liquidated.realized_pnl == D("2")
+
+
+def test_terminating_average_cost_retains_all_decimal_digits() -> None:
+    quantity = 2 ** 200
+    events = [event(1, TransactionType.DEPOSIT, amount=D(quantity + 1)),
+              event(2, TransactionType.BUY, asset_id="voo", quantity=D(quantity), price=D("1"), fee=D("1"))]
+    snapshot = replay(account(), events, {"voo": asset()})
+    # Independent exact rational oracle: the denominator contains only powers of 2.
+    assert Fraction(snapshot.positions[0].average_cost) == Fraction(quantity + 1, quantity)
+
+
+def test_replay_does_not_inherit_mutable_decimal_default_context(monkeypatch) -> None:
+    events = [event(1, TransactionType.DEPOSIT, amount=D("10000")),
+              event(2, TransactionType.BUY, asset_id="voo", quantity=D("3"), price=D("1"), fee=D("1"))]
+    expected = replay(account(), events, {"voo": asset()})
+    monkeypatch.setattr(DefaultContext, "Emax", 3)
+    monkeypatch.setitem(DefaultContext.traps, Inexact, True)
+    assert replay(account(), events, {"voo": asset()}) == expected
+
+
+def test_dst_fold_uses_actual_instant_for_replay() -> None:
+    zone = ZoneInfo("America/New_York")
+    deposit = replace(event(1, TransactionType.DEPOSIT, amount=D("100")),
+                      executed_at=datetime(2025, 11, 2, 1, 45, tzinfo=zone, fold=0))  # 05:45 UTC
+    buy = replace(event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("60")),
+                  executed_at=datetime(2025, 11, 2, 1, 30, tzinfo=zone, fold=1))  # 06:30 UTC
+    assert replay(account(), [buy, deposit], {"voo": asset()}).cash_balance == D("40")
+    # Same wall-clock order but the opposite financial order must be rejected.
+    invalid_buy = replace(buy, executed_at=datetime(2025, 11, 2, 1, 30, tzinfo=zone, fold=0))
+    with pytest.raises(ValueError, match="insufficient cash"):
+        replay(account(), [deposit, invalid_buy], {"voo": asset()})
+
+
+def test_unknown_or_misidentified_asset_is_rejected() -> None:
+    events = [event(1, TransactionType.DEPOSIT, amount=D("100")),
+              event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("10"))]
+    with pytest.raises(ValueError, match="unknown"):
+        replay(account(), events, {})
+    with pytest.raises(ValueError, match="asset.*id"):
+        replay(account(), events, {"voo": asset("different-id")})
+
+
+def test_multi_asset_pnl_losses_large_fees_liquidation_and_reentry() -> None:
+    assets = {"voo": asset(), "other": asset("other", "OTHER")}
+    events = [event(1, TransactionType.DEPOSIT, amount=D("100")),
+              event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("10"), fee=D("2")),
+              event(3, TransactionType.BUY, asset_id="other", quantity=D("2"), price=D("5")),
+              event(4, TransactionType.SELL, asset_id="voo", quantity=D("1"), price=D("20"), fee=D("25")),
+              event(5, TransactionType.SELL, asset_id="other", quantity=D("1"), price=D("8"), fee=D("1"))]
+    snapshot = replay(account(), events, assets)
+    assert snapshot.cash_balance == D("80")
+    assert snapshot.realized_pnl == D("-15")
+    assert snapshot.total_invested_cost == D("5")
+    assert value_at_prices(snapshot, {"other": D("4")}).unrealized_pnl == D("-1")
+    events.extend([
+        event(6, TransactionType.SELL, asset_id="other", quantity=D("1"), price=D("4"), fee=D("1")),
+        event(7, TransactionType.BUY, asset_id="voo", quantity=D("0.5"), price=D("10"), fee=D("1")),
+        event(8, TransactionType.SELL, asset_id="voo", quantity=D("0.25"), price=D("16")),
+        event(9, TransactionType.BUY, asset_id="voo", quantity=D("0.25"), price=D("20")),
+    ])
+    final = replay(account(), events, assets)
+    assert final.cash_balance == D("76")
+    assert final.realized_pnl == D("-16")
+    assert final.positions[0].quantity == D("0.5")
+    assert final.positions[0].cost_basis == D("8")
+    assert final.positions[0].average_cost == D("16")
+
+
+def test_sell_fee_cannot_make_cash_negative() -> None:
+    events = [event(1, TransactionType.DEPOSIT, amount=D("100")),
+              event(2, TransactionType.BUY, asset_id="voo", quantity=D("1"), price=D("100")),
+              event(3, TransactionType.SELL, asset_id="voo", quantity=D("1"), price=D("1"), fee=D("2"))]
+    with pytest.raises(ValueError, match="sale fee"):
+        replay(account(), events, {"voo": asset()})

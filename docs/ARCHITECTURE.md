@@ -165,3 +165,13 @@ Replay 결과는 불변 `AccountSnapshot`이며 Cash, 현재 Position, 평균 �
 `TransactionRepository.append`는 `BEGIN IMMEDIATE`로 쓰기 잠금을 얻은 후 해당 계좌의 기록을 읽고, 새 이벤트를 포함한 전체 Ledger를 유효 시각 순으로 Domain replay하여 검증하고, 성공하면 INSERT 후 commit한다. 과거 시점 backfill도 이 검증을 통과하면 저장하며 실패 시 rollback한다. 각 연결은 foreign key 검사를 켠다. 별도 연결을 통한 이중 지출도 순서대로 검증한다. 이것은 Phase 1의 단순한 동시성 계약이며 실제 주문 실행·예약·대사는 OD-07 범위다. 직접 DB 접근으로 규칙을 우회하지 않는 것이 application 계약이며, SQLite 파일에 대한 운영 권한 통제는 별도 과제다.
 
 Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원가는 그 시점 잔여 원가 비율로 배분하고 최종 매도에서는 잔여 원가 전부를 제거한다. Dividend는 원가를 바꾸지 않는다. Cash Asset은 만들지 않았다. Cash는 거래 이벤트에서 파생되는 단일 통화 계좌 상태이고, Asset 테이블은 거래·배당 대상 STOCK/ETF를 표현하기 때문이다. Tax Lot, 기업행사, FX와 외부 가격 시점은 해당 후속 Phase에서 정의한다.
+
+## 11. Phase 1 감사에서 보완한 경계
+
+- 시간 정렬은 `executed_at.astimezone(UTC)`와 sequence를 사용한다. DST 종료 때 같은 timezone 객체의 wall-clock 순서가 실제 순서와 달라지는 문제를 피한다. 저장은 offset을 포함한 ISO 시각을 사용하며, 재생 전후 같은 금융 시각으로 해석한다.
+- 나눗셈 정밀도는 `max(80, 분자 계수 자릿수 + 4 × 분모 계수 자릿수)`다. 유한소수의 약분된 분모는 2와 5의 거듭제곱이므로 이 상한으로 유한소수 결과를 보존할 수 있다. 소수 지수는 유효숫자에 중복 반영하지 않는다. 순환소수의 매우 작은 배분 오차는 잔여 원가에 남고, 마지막 매도에서 잔여 원가 전부를 사용한다. Decimal context의 모든 설정과 오류 trap을 명시한다.
+- 조회된 Asset의 `id`가 mapping key와 다르면 거부한다. 같은 ticker·다른 거래소의 자산은 여전히 각 ID로 처리한다.
+- COMMIT을 예외 처리 범위에 포함하고, 중단 예외도 rollback 후 다시 전달한다. `SQLITE_BUSY`로 commit이 실패한 뒤 미완료 INSERT와 잠금이 남는 것을 방지한다. `recursive_triggers`를 켜 REPLACE도 불변 트리거를 거치게 한다.
+- 기존 테스트에 반복 소수 수량 매도·재진입·다중 자산 손익·과도한 매도 수수료·DST 왕복·실제 commit 경합·동시 append를 추가했다. Phase 1 원장과 저장 검증이며, Broker 주문 예약·재시도·대사 검증을 대체하지 않는다.
+
+남은 제한: `SQLiteStore.connection`은 관리·진단용 raw connection을 노출하므로 application은 Repository 계약만 사용해야 한다. 외부 연결이나 직접 SQL로 새 이벤트 삽입·설정 변경을 하는 것은 불변식 보장 범위 밖이다. 전체 replay 기반 append의 장기 성능, 극단적인 숫자 입력의 자릿수·지수 자원 한도, migration·backup 운영은 후속 결정이 필요하다. 가격 mapping에는 아직 currency·기준 시각·출처가 없으므로 Phase 2에서 Asset ID 해석과 함께 검증 계약을 정해야 한다.
