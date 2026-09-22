@@ -2,7 +2,7 @@
 
 개인용 AI 자산운용 비서. 미국주식 장기 자산운용 보조와 한국주식 전략 검증·Paper Trading을 하나의 플랫폼에서 다룬다.
 
-현재 **Phase 4 — US Portfolio Policy Engine**까지 구현했다. 계좌 원장과 검증된 가격·FX를 연결하여 미국 USD 계좌의 현재 평가, 직접 Sector 노출, KRW 보고 환산을 계산하고, 불변 분석 결과에 인간 소유 Policy 설정을 적용한다. 주문 기능과 역사적 성과 분석은 없다.
+Phase 0~3은 완료했으며 **Phase 4 — US Portfolio Policy는 IN REVIEW / NOT DONE**이다. feature 브랜치의 Policy Engine은 검토 중인 candidate다. 계좌 원장과 검증된 가격·FX를 연결하여 미국 USD 계좌의 현재 평가, 직접 Sector 노출, KRW 보고 환산을 계산하고, 불변 분석 결과에 인간 소유 Policy 설정을 적용한다. 주문 기능과 역사적 성과 분석은 없다.
 
 ## 개발 시작
 
@@ -18,6 +18,9 @@ python -m pytest
 단위 테스트에는 환경 변수가 필요 없다. 실제 Twelve Data adapter를 사용할 때만 `TWELVE_DATA_API_KEY`가 필요하다. `.env` 자동 로더는 없다. 기본 미국 Policy는 `config/us_portfolio_policy.toml`에서 명시적으로 로드할 수 있다. 한국 Paper Trading 자금은 아직 선언만 되어 있다.
 
 ## 문서
+
+- [AGENTS.md](AGENTS.md): 작업·운영 규칙
+- [STATUS](docs/STATUS.md): 현재 Phase, 검증 근거와 미해결 완료 조건
 
 - [PROJECT_SPEC.md](PROJECT_SPEC.md): authoritative specification — 요구사항과 개발 기준
 - [Architecture](docs/ARCHITECTURE.md): 모듈 책임, 의존성, 데이터·주문 흐름

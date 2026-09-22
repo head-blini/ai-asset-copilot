@@ -1,6 +1,6 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation, Market Data 정규화, 미국 계좌 현재 분석과 보유 상태 Policy 평가다. AI·주문 Risk 승인·Execution·Broker 흐름은 향후 설계다.**
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation, Market Data 정규화, 미국 계좌 현재 분석과 검토 중인 candidate 보유 상태 Policy 평가다. Phase 4는 아직 완료되지 않았다. AI·주문 Risk 승인·Execution·Broker 흐름은 향후 설계다.**
 
 ## 1. 공통 Domain과 의존성
 
@@ -106,7 +106,7 @@ flowchart TD
 
 ## 4. 인간 Policy와 AI 경계
 
-Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고, evaluator는 현재 보유 자산 집중도·직접 Sector 집중도·Cash Range만 판정한다. Core/Growth ETF Target Range 및 전체 STOCK 한도는 해당 분류·운영 계약이 정해질 때 추가한다.
+Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고, evaluator는 현재 보유 자산 집중도·직접 Sector 집중도·Cash Range만 판정한다. Core/Growth ETF Target Range 및 전체 STOCK 한도의 누락은 Phase 4 OPEN 항목이다. 변경 이력·권한·적용 시점도 ROADMAP의 Phase 4 완료 조건에 남으며 후속 Phase로 이관하지 않는다.
 
 향후 application은 인간이 승인한 Policy 버전을 읽어 Risk Engine에 전달한다. AI에는 분석에 필요한 읽기 전용 데이터만 제공하며, Policy 저장소 쓰기 권한과 Broker credentials를 제공하지 않는다. Policy 변경 경로는 AI 제안 경로에서 분리하고 인간의 변경 이력과 적용 시점을 남긴다. 이를 강제하는 구체적 권한 구조는 OD-02에서 결정한다.
 
