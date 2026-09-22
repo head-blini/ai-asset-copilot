@@ -1,6 +1,6 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 패키지 bootstrap뿐이며 아래 구성 요소와 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation이며, AI·Market Data·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
 
 ## 1. 공통 Domain과 의존성
 
@@ -16,11 +16,11 @@ flowchart LR
     DOMAIN --> VALUE[공통 금융 개념]
 ```
 
-화살표는 의존성 방향이다. 외부 제공자 응답은 경계에서 내부 데이터로 변환한다. Domain 테스트는 네트워크나 실제 계좌 없이 실행 가능해야 한다. 금융 금액·수량·환율의 정밀도와 반올림 기준은 OD-01에서 먼저 정한다.
+화살표는 의존성 방향이다. 외부 제공자 응답은 경계에서 내부 데이터로 변환한다. Domain 테스트는 네트워크나 실제 계좌 없이 실행 가능해야 한다. Phase 1의 Decimal·원가·거래 시각 기준은 명세 17절에서 정했고, FX·표시·Broker·세금 반올림은 OD-01에 남겨 두었다.
 
 ## 2. 논리적 모듈
 
-아래는 미래 책임 지도이며 현재 디렉터리 목록이 아니다. 책임이 실제로 필요할 때 모듈을 만든다.
+아래는 책임 지도다. Phase 1에 필요한 `domain`, `portfolio`, `storage`만 구현했으며 나머지는 실제 책임이 생길 때 만든다.
 
 | 모듈 | 책임 | 경계 |
 | --- | --- | --- |
@@ -125,17 +125,43 @@ ai-asset-copilot/
 │   └── ROADMAP.md
 ├── src/
 │   └── asset_copilot/
-│       └── __init__.py
+│       ├── __init__.py
+│       ├── domain/
+│       │   ├── __init__.py
+│       │   ├── models.py
+│       │   └── repositories.py
+│       ├── portfolio/
+│       │   ├── __init__.py
+│       │   └── calculator.py
+│       └── storage/
+│           ├── __init__.py
+│           └── sqlite.py
 └── tests/
-    └── test_bootstrap.py
+    ├── test_bootstrap.py
+    ├── test_portfolio_domain.py
+    └── test_sqlite_repositories.py
 ```
 
-Phase 1에서 필요한 Domain·Portfolio·Storage만 추가하고 그 이후 실제 use case가 생기는 순서대로 확장한다. `config/`는 현재 저장소 내 선언 파일이며 설치 패키지의 runtime resource 계약은 아직 없다. `.env.example`에는 실제 환경 변수나 credentials를 요구하지 않는다.
+Phase 1에서 `src/asset_copilot/domain/{models,repositories}.py`, `portfolio/calculator.py`, `storage/sqlite.py`를 추가했다. 그 이후 실제 use case가 생기는 순서대로 확장한다. `config/`는 현재 저장소 내 선언 파일이며 설치 패키지의 runtime resource 계약은 아직 없다. `.env.example`에는 실제 환경 변수나 credentials를 요구하지 않는다.
 
 ## 9. 검증 전략
 
-Phase 0은 설치된 패키지 import와 pytest 실행만 smoke test로 확인한다. TOML 형식·초기 값과 문서 간 일관성은 bootstrap 검토에서 확인한다. 이 테스트로 투자 기능이나 주문 안전성이 검증되었다고 주장하지 않는다.
+Phase 0은 설치된 패키지 import와 pytest 실행만 smoke test로 확인했다. Phase 1은 Ledger의 손계산 fixture, 잘못된 입력, 재생 순서, 계좌 격리, SQLite 정밀도 왕복·재개방·불변 트리거·복수 연결에서의 이중 지출 거부를 검증한다. 이 테스트로 주문 안전성이 검증되었다고 주장하지 않는다.
 
 후속 Phase에서는 금융 계산의 단위·반올림·불변식, Policy 경계값, 계좌 간 격리, 비용·부분 체결·주문 거절, 중복 주문·재시도·통신 실패·대사, point-in-time 데이터와 Backtest 재현성을 단계에 맞게 검증한다. 실제 계좌 연결 전에는 Broker / Execution Safety Audit과 최종 Safety Audit을 별도로 수행한다.
 
 미결정 사항의 원장은 [PROJECT_SPEC의 Open Decisions](../PROJECT_SPEC.md#15-open-decisions)다. 이 문서에서 임의의 제공자, 수익률 계산식, 위험 한도 또는 실전 승인 기준을 추가하지 않는다.
+
+## 10. Phase 1 Ledger와 SQLite 구현
+
+Portfolio는 운용 목적, Account는 Ledger와 잔고의 독립 경계다. Account는 하나의 Portfolio에 연결되며 Portfolio 하나에 Account 여러 개를 만들 수 있다. 계좌 간 거래·현금·포지션을 합쳐 재생하지 않는다. `AccountType`은 상태 구분용이고 Phase 1 계산에 계좌별 특례를 만들지 않는다.
+
+`Transaction`은 frozen Domain record다. 계좌별 양의 연속 `sequence`가 authoritative replay 순서다. `executed_at`은 시간대가 있어야 하고 sequence가 진행될수록 이전 시각으로 돌아갈 수 없다. 같은 시각의 여러 이벤트는 sequence로 구분한다. 거래는 한 통화·한 계좌·선택적인 한 자산에 속한다. Domain의 `replay` 함수는 임의 순서로 전달된 이벤트를 sequence로 정렬하고, 누락·중복·통화 불일치·잔고 부족·초과 매도를 거부한다.
+
+Replay 결과는 불변 `AccountSnapshot`이며 Cash, 현재 Position, 평균 원가, 잔여 Cost Basis, Total Invested Cost, 누적 Realized PnL을 포함한다. 수동 가격 mapping을 넣는 별도 함수가 시장가치·Unrealized PnL·총가치·Position Weight·Cash Ratio를 계산한다. Snapshot을 authoritative 저장 상태로 쓰지 않는다. 모든 열린 Position의 ticker 가격이 있어야 하며 ticker가 한 계좌 안에서 중복되면 모호한 가격 입력을 거부한다.
+
+`domain/repositories.py`는 Portfolio·Account·Asset·Transaction Repository 계약을 정의한다. `storage/sqlite.py`의 adapter는 네 테이블과 계좌별 sequence 유일 제약을 사용한다. Decimal 컬럼은 `TEXT`이고 Python Decimal을 `str()`로 직렬화한 뒤 `Decimal()`로 복원한다. SQLite NUMERIC/REAL affinity로 인한 이진 부동소수 변환을 피한다. 거래 UPDATE/DELETE는 DB 트리거가 거부한다.
+
+`TransactionRepository.append`는 `BEGIN IMMEDIATE`로 쓰기 잠금을 얻은 후 해당 계좌의 기록을 읽고, 새 이벤트까지 Domain replay로 검증하고, 성공하면 INSERT 후 commit한다. 실패 시 rollback한다. 각 연결은 foreign key 검사를 켠다. 별도 연결을 통한 이중 지출도 순서대로 검증한다. 이것은 Phase 1의 단순한 동시성 계약이며 실제 주문 실행·예약·대사는 OD-07 범위다. 직접 DB 접근으로 규칙을 우회하지 않는 것이 application 계약이며, SQLite 파일에 대한 운영 권한 통제는 별도 과제다.
+
+Cost Basis는 이동 가중평균 분석 값이다. 부분 매도의 처분 원가는 그 시점 잔여 원가 비율로 배분하고 최종 매도에서는 잔여 원가 전부를 제거한다. Dividend는 원가를 바꾸지 않는다. Cash Asset은 만들지 않았다. Cash는 거래 이벤트에서 파생되는 단일 통화 계좌 상태이고, Asset 테이블은 거래·배당 대상 STOCK/ETF를 표현하기 때문이다. Tax Lot, 기업행사, FX와 외부 가격 시점은 해당 후속 Phase에서 정의한다.

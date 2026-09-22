@@ -1,11 +1,11 @@
 # Development Roadmap
 
-[PROJECT_SPEC.md](../PROJECT_SPEC.md)가 authoritative specification이다. 이 문서는 그 로드맵을 구현 범위와 완료 조건으로 구체화한다. 현재는 **Phase 0**이며 나머지는 계획이다. 단계 완료는 자동 자금 투입 승인을 뜻하지 않는다.
+[PROJECT_SPEC.md](../PROJECT_SPEC.md)가 authoritative specification이다. 이 문서는 그 로드맵을 구현 범위와 완료 조건으로 구체화한다. **Phase 0과 Phase 1은 완료**, 다음 단계는 Phase 2 Market Data다. 단계 완료는 자동 자금 투입 승인을 뜻하지 않는다.
 
 | Phase | 주제 | 권장 범위와 완료 조건 |
 | --- | --- | --- |
-| 0 | Project Bootstrap / Architecture | 최소 패키지·설정 선언·핵심 문서·pytest 환경. 설치/import 확인, 요구사항 충돌 검토 |
-| 1 | Portfolio Foundation | 공통 포트폴리오·계좌·자산·포지션·거래·현금 개념과 수치 규칙 결정. 기본 계산 및 테스트, 최소 SQLite 저장·재조회 기반 |
+| 0 | Project Bootstrap / Architecture | 완료. 최소 패키지·설정 선언·핵심 문서·pytest 환경 |
+| 1 | Portfolio Foundation | 완료. 공통 포트폴리오·계좌·자산과 Ledger 재생, Decimal 계산·수동 가격 평가, SQLite 저장·재조회 및 테스트 |
 | 2 | Market Data | Provider 계약과 가격·FX 정규화, 출처·기준 시점·오래된 데이터·오류 처리 검증 |
 | 3 | US Portfolio Analytics | 평가·손익·비중·현금·Sector·FX 노출과 성과 지표. Benchmark와 계산 기준 결정 및 검증 |
 | 4 | US Portfolio Policy | 인간 소유 설정 loader/validator, 범위·집중도·Risk 평가. Policy 변경 이력·권한·경계값 검증 |
@@ -29,7 +29,7 @@ Phase 12에 Broker credentials나 adapter가 존재해도 실주문 권한을 �
 
 ## Phase 1 권장 구현 범위
 
-먼저 OD-01과 OD-06 중 Foundation에 필요한 결정을 해결한다. 이 절은 권장 범위이며 현재 Phase에서 구현하지 않는다.
+Phase 1 구현 기준과 완료 검증 범위의 기록이다. OD-01과 OD-06 중 Foundation에 필요한 결정을 해결했다.
 
 1. 포트폴리오·계좌·자산·통화·거래·포지션의 최소 Domain과 식별 규칙을 정한다. 다섯 초기 Portfolio ID를 지원하고 계좌별 상태를 분리한다.
 2. 금액·수량의 Decimal 정밀도와 반올림, Cost Basis·Average Price·Realized/Unrealized PnL의 기준, 거래 시간과 평가 시점을 결정한다.

@@ -4,7 +4,7 @@
 
 이 문서는 `ai-asset-copilot`의 **authoritative specification**이다. 요구사항 충돌 시 이 문서를 기준으로 해결하며, 정책 변경은 인간의 명시적 결정으로 반영한다. README는 진입 안내, Architecture는 설계 설명, Roadmap은 단계별 작업 범위를 제공한다.
 
-현재 단계는 **Phase 0 — Project Bootstrap / Architecture**다. 이번 산출물은 문서, 최소 Python 패키지, 선언적 기본 설정과 pytest 환경이다. 아래의 시스템 동작은 별도 표시가 없으면 **향후 구현 요구사항**이다. 문서에 기록된 안전 경계는 현재 실행 코드로 구현되어 있지 않다.
+현재 단계는 **Phase 1 — Portfolio Foundation**이다. Phase 0의 문서·최소 패키지 위에 계좌별 Ledger, 기본 금융 계산, SQLite 저장을 구현한다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·시장 데이터·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
 
 ## 2. 목적과 불변 원칙
 
@@ -205,12 +205,12 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 
 | ID | 미결정 사항 | 결정 시점 |
 | --- | --- | --- |
-| OD-01 | 금융 수치의 Decimal 정밀도·반올림, Cost Basis 방식, 수수료 배분, FX 환산 기준, 자산·계좌 식별, 거래 및 기업행사 표현, 시간대·평가 시점 | Phase 1, Market Data 연결 전 보완 |
+| OD-01 | Phase 1 확정: Decimal만 사용, 중간 통화 반올림 없음, 이동 가중평균 원가, 매수 수수료 원가 포함·매도 수수료 실현손익 차감, 불투명 문자열 ID, 시간대가 있는 거래 시각과 계좌별 sequence. 미결정: 표시·Broker·세금 반올림, FX 기준, 추가 기업행사, 시장 가격의 평가 시점 | Phase 1 일부 확정; 나머지는 해당 Phase에서 결정 |
 | OD-02 | 자산·Sector 분류와 ETF look-through, 비중 분모, Risk 한도 적용 대상, 경계값 포함 여부, 리밸런싱 트리거·거래 우선순위, 위반 상태 복구, 인간 Policy 변경 승인·버전 적용 방식 | Phase 4; Shadow 실행 전 |
 | OD-03 | Benchmark 자산, 초기 자본·입출금 대응, 배당 재투자, TWR/MWR 등 수익률 기준, 비교 통화·기간·체결 가정, Sharpe 무위험 수익률·연율화, 집중도 정의 | Phase 3–5 |
 | OD-04 | Market Data Provider, 데이터 라이선스·지연·수정주가·상장폐지 종목·point-in-time coverage, FX 출처, AI Provider·모델과 개인정보 전송 범위 | Market Data: Phase 2, AI: Phase 7 |
 | OD-05 | 한국 시장 Commission·Tax·Slippage, 체결·호가·유동성·Partial Fill 모델, Market Hours, 결제·가용 현금 규칙, Position/Daily Loss Limit 수치·기준 | Phase 8; Phase 9–10 전에 검증 |
-| OD-06 | Repository 계약, DB Schema·마이그레이션·트랜잭션, SQLite 동시성, PostgreSQL 이전 기준 | Phase 1 및 저장 요구 확장 시 |
+| OD-06 | Phase 1 확정: 4개 Repository 계약, SQLite 4개 테이블·거래 불변 트리거, Decimal TEXT 저장, Ledger append의 `BEGIN IMMEDIATE` 검증·저장. 미결정: Schema migration, 장기 동시성·성능, PostgreSQL 이전 기준 | Phase 1 일부 확정; 저장 요구 확장 시 보완 |
 | OD-07 | 주문·Risk 승인 계약, idempotency key, 동시 주문 시 자금 예약, 승인 유효성 재검사, 재시도·대사·중단·복구, Broker Provider와 capability·계좌 권한 | Phase 8; Phase 12 연결 전 Safety Audit |
 | OD-08 | 전략 평가 기간·승격 기준·허용 손실, 단계별 인간 승인, 실전 계좌 ID, 자금 한도의 정의, 증액·감액·중단·rollback 기준 | Phase 10; Phase 13 자금 연결 전 확정 |
 | OD-09 | Journal/Thesis 버전·보존·검토 일정, AI 제안 채택·보류·거절의 표현, 개인정보 보관과 삭제 | Phase 6–7 |
@@ -225,3 +225,19 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 - 초기 Policy 설정과 KR 가상 자금 선언이 이 명세와 일치한다.
 - 문서 간 로드맵·안전 경계·미구현 범위의 충돌을 검토한다.
 - 변경 파일, 테스트 결과, Git 상태, Phase 1 권장 범위와 미결정 사항을 보고한다.
+
+## 17. Phase 1 Portfolio Foundation 계약
+
+Portfolio는 운용 목적 또는 전략 단위이며 `id`, `name`만 가진다. Account는 Ledger와 잔고의 독립 경계이며 하나의 Portfolio에 속한다. 여러 Account가 한 Portfolio에 속할 수 있다. `REAL`, `SHADOW`, `PAPER`, `BENCHMARK` 유형과 `USD`, `KRW` 통화를 지원한다. 특정 Portfolio ID에 계산 규칙을 묶지 않는다.
+
+**Transaction Ledger가 Source of Truth**다. Account에 현금·평가액·손익을 authoritative persisted field로 두지 않는다. `DEPOSIT`, `WITHDRAW`, `BUY`, `SELL`, `DIVIDEND`는 불변 이벤트이며, 각 Account의 `sequence`가 1부터 연속되어 재생 순서를 정한다. 같은 `executed_at`은 허용하되, 뒤의 sequence가 더 이른 거래 시각을 가질 수 없다. 거래 시각은 시간대가 있어야 한다. 과거 이벤트 수정·삭제 대신 향후 correction/reversal event 확장을 검토한다. 현재 correction 기능은 없다.
+
+현금 이벤트에는 양수 `amount`를 사용한다. `DEPOSIT`과 `WITHDRAW`는 자산 없이 기록하며 `DIVIDEND`는 지급 자산 ID를 요구하고 원가를 바꾸지 않는다. 거래에는 양수 Decimal `quantity`와 `price`, 음수가 아닌 Decimal `fee`를 쓴다. BUY에 필요한 현금은 `quantity × price + fee`이며 수수료를 취득 원가에 포함한다. SELL은 보유량을 초과할 수 없고, 당시 이동 평균 원가로 처분 원가를 배분한다. 실현손익은 `매도금액 − 처분 원가 − 매도 수수료`다. 전량 매도하면 수량·잔여 원가를 정확히 0으로 정리한다. 입금 없이 초기 잔고를 생성하지 않는다. 따라서 `KR_PAPER`의 선언된 10,000,000 KRW도 향후 실제 사용 시에는 `DEPOSIT` 이벤트로 기록해야 한다.
+
+금액·가격·수량·원가·손익은 모두 Decimal이다. SQLite에는 소수 값을 `TEXT`로 직렬화해 부동소수 변환 없이 왕복한다. 덧셈·곱셈은 입력 자릿수에 맞는 충분한 정밀도로 처리하고, 나눗셈 결과가 무한 소수일 때는 최소 80 유효숫자와 `ROUND_HALF_EVEN`을 사용한다. 이 내부 나눗셈 경계는 cents 반올림이나 세금 규칙이 아니다. 부분 매도 후 남은 원가는 이전 원가에서 배분 원가를 뺀 값으로 유지한다. 외부 Decimal context와 무관하게 재생 결과가 같다.
+
+수동 ticker→Decimal 가격 mapping을 모두 제공하면 현재 보유 Position의 시장가치·미실현손익·계좌 총가치·Position Weight·Cash Ratio를 계산한다. 미실현손익은 실현손익과 분리한다. 가격이 빠지거나 같은 계좌에서 ticker가 모호하면 평가를 거부한다. 계좌 총가치가 0이면 Cash Ratio는 정의되지 않아 `None`이다. 가격 데이터의 신선도와 시점은 Phase 2에서 다룬다.
+
+Phase 1의 Cost Basis는 **Portfolio Analytics용 이동 가중평균**이다. 미국 세금 신고용 Tax Lot 회계로 간주하지 않는다. FIFO·Specific Identification·Broker statement 기준은 미래 Tax/Lot Engine의 범위다. Asset은 STOCK·ETF만 나타내며 Cash는 별도 자산이 아니라 계좌 Ledger의 파생 상태로 둔다. FX 변환도 수행하지 않고 다른 통화의 거래·자산을 거부한다.
+
+Repository 계약은 Domain 측에 두고 SQLite adapter는 이를 구현한다. 저장소는 새 거래를 계좌별 Ledger와 함께 검증한 뒤 원자적으로 추가한다. 현재 Schema는 최초 버전이며 마이그레이션 도구나 PostgreSQL 구현은 없다. 이 Foundation은 수동으로 기록한 거래를 계산하기 위한 것이며 실제 주문을 실행하지 않는다.
