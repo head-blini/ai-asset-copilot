@@ -6,6 +6,7 @@ import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from http.client import HTTPException
 from typing import Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -32,8 +33,8 @@ class TwelveDataInstrument:
             raise ValueError("provider exchange is required")
 
 
-def _http_get(url: str, timeout: float) -> bytes:
-    with urlopen(Request(url, headers={"Accept": "application/json"}), timeout=timeout) as response:
+def _http_get(request: Request, timeout: float) -> bytes:
+    with urlopen(request, timeout=timeout) as response:
         return response.read(65537)
 
 
@@ -88,13 +89,14 @@ class TwelveDataMarketDataProvider:
         instruments: Mapping[str, TwelveDataInstrument],
         *,
         api_key: str | None = None,
-        http_get: Callable[[str, float], bytes] = _http_get,
+        http_get: Callable[[Request, float], bytes] = _http_get,
         timeout: float = 5.0,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
-        self._api_key = api_key if api_key is not None else os.environ.get("TWELVE_DATA_API_KEY")
-        if not self._api_key or not self._api_key.strip():
+        raw_key = api_key if api_key is not None else os.environ.get("TWELVE_DATA_API_KEY")
+        if not isinstance(raw_key, str) or not raw_key.strip():
             raise AuthenticationError("TWELVE_DATA_API_KEY is required")
+        self._api_key = raw_key.strip()
         if not isinstance(timeout, (int, float)) or not 0 < timeout <= 120:
             raise ValueError("timeout must be positive and at most 120 seconds")
         self._instruments = dict(instruments)
@@ -106,16 +108,18 @@ class TwelveDataMarketDataProvider:
         self._clock = clock
 
     def _request(self, endpoint: str, **params: str) -> dict:
-        url = "https://api.twelvedata.com/" + endpoint + "?" + urlencode({**params, "apikey": self._api_key})
+        url = "https://api.twelvedata.com/" + endpoint + "?" + urlencode(params)
+        request = Request(url, headers={"Accept": "application/json",
+                                        "Authorization": "apikey " + self._api_key})
         try:
-            body = self._http_get(url, self._timeout)
+            body = self._http_get(request, self._timeout)
         except HTTPError as exc:
             if exc.code in (401, 403):
                 raise AuthenticationError("market data authentication failed") from None
             if exc.code == 429:
                 raise RateLimitError("market data rate limit exceeded") from None
-            if exc.code == 404:
-                raise InstrumentError("provider instrument not found") from None
+            if exc.code in (400, 404):
+                raise InstrumentError("invalid provider instrument or request") from None
             raise ResponseError(f"provider HTTP error {exc.code}") from None
         except (TimeoutError, socket.timeout):
             raise RequestTimeoutError("market data request timed out") from None
@@ -123,13 +127,13 @@ class TwelveDataMarketDataProvider:
             if isinstance(exc.reason, (TimeoutError, socket.timeout)):
                 raise RequestTimeoutError("market data request timed out") from None
             raise NetworkError("market data network failure") from None
-        except OSError:
+        except (OSError, HTTPException):
             raise NetworkError("market data network failure") from None
         if not isinstance(body, bytes) or len(body) > 65536:
             raise ResponseError("provider response exceeds size limit")
         try:
             payload = json.loads(body, parse_float=_json_decimal, parse_int=_json_int)
-        except (TypeError, ValueError, UnicodeError, InvalidOperation):
+        except (TypeError, ValueError, UnicodeError, InvalidOperation, RecursionError):
             raise ResponseError("malformed provider JSON") from None
         if not isinstance(payload, dict):
             raise ResponseError("provider response must be an object")
@@ -154,7 +158,8 @@ class TwelveDataMarketDataProvider:
             instrument = self._instruments.get(asset.id)
             if instrument is None:
                 raise InstrumentError(f"no provider instrument mapping for asset_id {asset.id}")
-            payload = self._request("quote", symbol=instrument.symbol, exchange=instrument.exchange)
+            payload = self._request("quote", symbol=instrument.symbol,
+                                    exchange=instrument.exchange, interval="1min")
             if payload.get("symbol") != instrument.symbol:
                 raise ResponseError("provider returned a different symbol")
             if (payload.get("exchange") is not None
@@ -163,9 +168,11 @@ class TwelveDataMarketDataProvider:
                 raise ResponseError("provider returned a different exchange")
             if payload.get("currency") != asset.currency.value:
                 raise ResponseError("provider quote currency differs from asset currency")
-            # /quote timestamp is the candle opening, not necessarily the last trade.
-            # Only last_quote_at denotes the observed quote time.
-            as_of = _timestamp(payload.get("last_quote_at"))
+            # Both fields must identify the same minute bar. Its opening time is a
+            # conservative reference for close, not a last-trade timestamp.
+            bar_start = _timestamp(payload.get("timestamp"))
+            last_minute = _timestamp(payload.get("last_quote_at"))
+            as_of = bar_start if bar_start is not None and bar_start == last_minute else None
             fetched_at = self._clock()
             try:
                 results[asset.id] = MarketQuote(

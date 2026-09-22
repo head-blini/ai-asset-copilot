@@ -40,9 +40,9 @@ flowchart LR
 
 ### Phase 2 Market Data 경계
 
-`market.provider.MarketDataProvider`는 Asset 목록에서 asset_id별 `MarketQuote`를, 통화 방향에서 `FxQuote`를 얻는 계약이다. 내부 quote 타입과 순수 신선도 판정은 `market.models`, 공통 오류는 `market.errors`, Twelve Data HTTP·응답 파싱과 명시적 asset_id→symbol/exchange resolver는 `market.twelve_data`에 둔다. 다른 provider도 내부 타입과 계약을 따를 수 있다. 첫 adapter는 미국 USD 주식·ETF 가격과 FX를 조회하며 한국 가격 adapter는 없다. 표준 라이브러리 `urllib`에 명시적 timeout과 주입 가능한 HTTP 함수를 사용하므로 추가 runtime dependency 없이 네트워크 없는 adapter 테스트를 수행한다.
+`market.provider.MarketDataProvider`는 Asset 목록에서 asset_id별 `MarketQuote`를, 통화 방향에서 `FxQuote`를 얻는 계약이다. 내부 quote 타입과 순수 신선도 판정은 `market.models`, 공통 오류는 `market.errors`, Twelve Data HTTP·응답 파싱과 명시적 asset_id→symbol/exchange resolver는 `market.twelve_data`에 둔다. 다른 provider도 내부 타입과 계약을 따를 수 있다. 첫 adapter는 미국 USD 주식·ETF 가격과 FX를 조회하며 한국 가격 adapter는 없다. 표준 라이브러리 `urllib`에 명시적 timeout과 주입 가능한 HTTP 함수를 사용하므로 추가 runtime dependency 없이 네트워크 없는 adapter 테스트를 수행한다. API key는 Authorization 헤더로 전송해 URL에 포함하지 않는다.
 
-Twelve Data `/quote`의 `close`는 가격이며 `last_quote_at`이 있을 때만 시장 시각으로 채택한다. candle-opening `timestamp`는 마지막 가격 시각이 아니다. `/exchange_rate`의 `timestamp`는 환율 시각이다. 출처는 `twelve_data`이고 모든 내부 시간은 UTC다. `as_of=None`이면 최신 가격임을 입증할 수 없으므로 stale다. 호출자가 기준 시각과 `max_age`를 지정하고 투자용 threshold는 아직 정하지 않는다. `FxQuote.rate`는 base 1단위당 quote 통화 단위다. 제공자 오류를 명시적 Market Data 오류로 바꾸며 가상 가격 자동 fallback은 없다.
+Twelve Data `/quote`는 기본 `1day`의 `close`와 마지막 1분 캔들 시각이 섞이지 않도록 `interval=1min`을 명시한다. 응답의 `timestamp`와 `last_quote_at`이 동일한 1분 캔들을 가리킬 때만 그 캔들 시작 시각을 `as_of`로 쓴다. 둘이 없거나 다르면 `as_of=None`이다. 이 시각은 정확한 마지막 거래 시각이 아니며 가격 기준을 보수적으로 나타낸다. `/exchange_rate`의 `timestamp`는 환율 시각이다. 출처는 `twelve_data`이고 모든 내부 시간은 UTC다. `as_of=None`이면 최신 가격임을 입증할 수 없으므로 stale다. 호출자가 기준 시각과 `max_age`를 지정하고 투자용 threshold는 아직 정하지 않는다. `FxQuote.rate`는 base 1단위당 quote 통화 단위다. 제공자 오류를 명시적 Market Data 오류로 바꾸며 가상 가격 자동 fallback은 없다.
 
 Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestration에서 quote의 asset_id·통화·신선도·시점을 확인한 뒤 `{asset_id: Decimal}`을 만들어 전달한다. FX를 계좌 평가에 적용하지 않으며 최신 quote cache/과거 가격 history 테이블도 만들지 않는다. 데이터 라이선스, 시세 지연, 수정주가, 상장폐지, point-in-time 보장 및 실제 투자용 freshness 정책은 OD-04에 남긴다.
 

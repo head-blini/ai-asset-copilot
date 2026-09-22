@@ -4,7 +4,7 @@
 
 이 문서는 `ai-asset-copilot`의 **authoritative specification**이다. 요구사항 충돌 시 이 문서를 기준으로 해결하며, 정책 변경은 인간의 명시적 결정으로 반영한다. README는 진입 안내, Architecture는 설계 설명, Roadmap은 단계별 작업 범위를 제공한다.
 
-현재 단계는 **Phase 1 — Portfolio Foundation**이다. Phase 0의 문서·최소 패키지 위에 계좌별 Ledger, 기본 금융 계산, SQLite 저장을 구현한다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·시장 데이터·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
+현재 구현 완료 단계는 **Phase 2 — Market Data**다. Phase 1의 계좌별 Ledger, 기본 금융 계산, SQLite 저장 위에 시장 가격·FX 정규화와 첫 HTTP adapter를 추가했다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
 
 ## 2. 목적과 불변 원칙
 
@@ -246,8 +246,8 @@ Phase 1 감사 보완: `executed_at` 정렬 시 UTC의 실제 시각을 비교�
 
 ## 18. Phase 2 Market Data 계약
 
-`MarketDataProvider`는 복수 Asset의 최신 가격을 `asset_id → MarketQuote`로 돌려주고, 방향이 명시된 `FxQuote`를 조회하는 provider-neutral 계약이다. Portfolio Domain의 canonical identity는 계속 `asset_id`다. Twelve Data adapter에 전달하는 `asset_id → (provider symbol, exchange)` mapping은 명시적으로 등록하며, Asset.ticker에서 암묵적으로 생성하지 않는다. 첫 adapter는 Twelve Data의 미국 USD 주식·ETF `/quote`와 통화쌍 `/exchange_rate`를 사용한다. API key는 `TWELVE_DATA_API_KEY` 환경변수에서 읽을 수 있으며 코드·설정·테스트에 실제 키를 저장하지 않는다.
+`MarketDataProvider`는 복수 Asset의 최신 가격을 `asset_id → MarketQuote`로 돌려주고, 방향이 명시된 `FxQuote`를 조회하는 provider-neutral 계약이다. Portfolio Domain의 canonical identity는 계속 `asset_id`다. Twelve Data adapter에 전달하는 `asset_id → (provider symbol, exchange)` mapping은 명시적으로 등록하며, Asset.ticker에서 암묵적으로 생성하지 않는다. 첫 adapter는 Twelve Data의 미국 USD 주식·ETF `/quote`와 통화쌍 `/exchange_rate`를 사용한다. API key는 `TWELVE_DATA_API_KEY` 환경변수에서 읽을 수 있으며 HTTP Authorization 헤더로 전송한다. URL·코드·설정·테스트에 실제 키를 저장하지 않는다.
 
-`MarketQuote`는 asset_id, 양의 유한 Decimal 가격, 통화, `as_of`, `fetched_at`, 출처를 가진다. `FxQuote`는 기준 통화 1단위당 상대 통화 단위의 양의 유한 Decimal 환율과 같은 시점·출처 정보를 가진다. 예를 들어 USD/KRW 1370은 1 USD = 1370 KRW다. `as_of`는 제공자가 확인한 실제 시장 기준 시각이며 제공하지 않으면 `None`이다. `fetched_at`은 시스템 조회 시각이다. 둘은 시간대가 있어야 하며 UTC로 정규화한다. `/quote`의 candle-opening `timestamp`를 마지막 가격 시각으로 대체하지 않는다. `last_quote_at`이 없으면 `as_of=None`이다.
+`MarketQuote`는 asset_id, 양의 유한 Decimal 가격, 통화, `as_of`, `fetched_at`, 출처를 가진다. `FxQuote`는 기준 통화 1단위당 상대 통화 단위의 양의 유한 Decimal 환율과 같은 시점·출처 정보를 가진다. 예를 들어 USD/KRW 1370은 1 USD = 1370 KRW다. `as_of`는 제공자가 확인한 시장 가격의 기준 시각이며 제공하지 않으면 `None`이다. `fetched_at`은 시스템 조회 시각이다. 둘은 시간대가 있어야 하며 UTC로 정규화한다. Twelve Data `/quote`는 `interval=1min`으로 조회한다. `close`가 속한 1분 캔들의 시작을 나타내는 `timestamp`와 마지막 1분 캔들을 나타내는 `last_quote_at`이 모두 존재하고 같을 때만 이 보수적인 캔들 기준 시각을 `as_of`로 사용한다. 하나라도 없거나 다르면 `as_of=None`이다. 이는 마지막 개별 거래의 정확한 시각을 뜻하지 않는다.
 
 신선도는 quote에 영구 boolean으로 저장하지 않는다. 호출자가 제공한 평가 시각과 `max_age`로 순수 판정하며, 미상 또는 미래의 `as_of`는 stale로 판정한다. 투자용 age threshold와 장 마감·FX별 정책은 미결정이다. 인증·한도·잘못된 symbol·응답 손상·네트워크·시간 초과는 adapter의 명시적 오류로 격리하며 mock 가격으로 자동 대체하지 않는다. 숫자는 JSON에서 float를 경유하지 않고 Decimal로 읽으며 길이·크기를 제한한다. Phase 1의 `value_at_prices()`는 변경하지 않는다. 상위 orchestration이 quote currency·시점·신선도를 검증하고 `{asset_id: Decimal price}`를 넘겨야 하며, 그 연결 및 USD 계좌의 KRW 통합 평가는 Phase 3 범위다. Market Quote 저장 테이블과 과거 데이터 엔진은 이번 Phase에 추가하지 않는다.
