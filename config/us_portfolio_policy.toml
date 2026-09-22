@@ -1,6 +1,7 @@
 # Human-owned initial policy; requirements: PROJECT_SPEC.md section 4.
 # Values use percentage points: 50 means 50%, not 0.50.
-# Phase 0 declares data only. No loader, validator, or enforcement exists yet.
+# Phase 4 loader validates this file. Current-state evaluator uses individual
+# position, direct sector, and cash range limits; other allocations remain declared.
 # These fields are not an authorization mechanism. AI must never write policy.
 policy_version = "initial-v1"
 

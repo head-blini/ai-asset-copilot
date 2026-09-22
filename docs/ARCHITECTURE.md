@@ -1,12 +1,12 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation, Market Data 정규화, 현재 미국 계좌 분석이다. AI·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation, Market Data 정규화, 미국 계좌 현재 분석과 보유 상태 Policy 평가다. AI·주문 Risk 승인·Execution·Broker 흐름은 향후 설계다.**
 
 ## 1. 공통 Domain과 의존성
 
 미국 장기 자산운용과 한국 전략 검증은 계좌, 포트폴리오, 현금, 포지션, 거래, 평가 시점 등의 공통 개념을 공유한다. 시장별 거래 규칙과 제공자 통신은 별도 경계에 둔다. Domain은 AI SDK, Broker SDK, Market Data SDK, DB·ORM, 웹 프레임워크를 import하지 않는다.
 
-Phase 3 `application`은 Repository와 MarketDataProvider 계약을 주입받아 순수 Portfolio 계산을 호출한다. 향후 다른 use case의 Risk 검사와 실행 권한은 별도 경계에서 정의한다. Infrastructure adapter가 이 계약을 구현한다.
+Phase 3 `application`은 Repository와 MarketDataProvider 계약을 주입받아 순수 Portfolio 계산을 호출한다. Phase 4 Policy Engine은 그 불변 분석 결과와 검증된 설정만 읽는다. 향후 주문 Risk 검사와 실행 권한은 별도 경계에서 정의한다. Infrastructure adapter가 Repository·Provider 계약을 구현한다.
 
 ```mermaid
 flowchart LR
@@ -20,16 +20,16 @@ flowchart LR
 
 ## 2. 논리적 모듈
 
-아래는 책임 지도다. Phase 1의 `domain`, `portfolio`, `storage`, Phase 2의 `market`, Phase 3의 `application`을 구현했으며 나머지는 실제 책임이 생길 때 만든다.
+아래는 책임 지도다. Phase 1의 `domain`, `portfolio`, `storage`, Phase 2의 `market`, Phase 3의 `application`, Phase 4의 현재 보유 Policy 평가를 구현했으며 나머지는 실제 책임이 생길 때 만든다.
 
 | 모듈 | 책임 | 경계 |
 | --- | --- | --- |
 | `domain` | 공통 식별자·금융 개념·불변식·provider/repository 계약 | 외부 SDK와 저장소 구현에 독립 |
 | `portfolio` | 계좌·포지션·거래·현금과 평가·손익 계산 | 계산 결과의 근거와 시점 보존 |
-| `application` | Repository·Market Provider를 조합한 현재 미국 계좌 분석 | 관측 시점·통화·신선도 확인 후 순수 계산 호출 |
+| `application` | 현재 미국 계좌 분석, 인간 Policy TOML 로딩, 분석 결과에 대한 순수 Policy 평가 | 관측 검증과 정책 판정을 별도 함수·클래스로 분리 |
 | `market` | 가격·FX·시장 상태의 조회 계약과 정규화 | 외부 API adapter와 순수 데이터 검증 분리 |
 | `research` | Research 자료, Investment Thesis, Decision Journal | 당시 근거와 사후 결과를 구분 |
-| `risk` | Portfolio Policy, 자금·포지션·손실 제한의 코드 기반 검증 | LLM 해석에 의해 판정이 바뀌지 않음 |
+| `risk` | 향후 주문 자금·포지션·손실 제한의 코드 기반 승인 | 현재 보유 Policy 보고서와 주문 승인 계약을 혼동하지 않음 |
 | `strategy` | 코드로 정의된 전략과 주문 의도 생성 | Broker 직접 호출 금지 |
 | `execution` | Risk 승인 검증, 주문 상태·중복 방지·체결·취소·대사 | 승인 없는 주문 전달 금지 |
 | `broker` | Mock/Paper/실제 provider의 통신·체결 adapter | 실행 모드·계좌 capability 구분 |
@@ -61,7 +61,20 @@ Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestrati
 
 검증한 Quote를 application 소유 mapping에 보존하고 가격과 결과 메타데이터 모두에 같은 불변 observation을 사용한다. FX 조회 중 Provider cache가 갱신되어도 이미 사용한 가격의 provenance가 바뀌지 않는다. extra quote는 사용하지 않고 필수 quote 누락은 거부한다. MarketDataError 하위 오류는 그대로 전달하며, 의미 검증은 AnalysisError, Ledger 위반은 replay의 ValueError, 저장소 장애는 Repository 오류로 구분한다. 부분 결과나 자동 fallback은 없다.
 
-빈 계좌에도 환율·출처·시각을 제공하는 기존 결과 계약을 유지하므로 FX가 실패하면 분석도 실패한다. 산술상 0 환산에 FX가 필요해서가 아니라 명시적인 환율 관측을 제공하기 위한 계약이다. FX 없는 결과 모델은 이번 감사에서 도입하지 않는다. USD exposure는 평가 통화 기준이며 경제적 통화 노출은 아니다. Sector 비중은 현금 포함 총가치가 분모다. 금액 합계는 정확하나 순환소수 비율의 합계에는 기존 Decimal 나눗셈 정밀도 수준의 잔차가 있을 수 있다. Policy 경계에서 이를 다루는 방식은 OD-02로 남긴다.
+빈 계좌에도 환율·출처·시각을 제공하는 기존 결과 계약을 유지하므로 FX가 실패하면 분석도 실패한다. 산술상 0 환산에 FX가 필요해서가 아니라 명시적인 환율 관측을 제공하기 위한 계약이다. FX 없는 결과 모델은 이번 감사에서 도입하지 않는다. USD exposure는 평가 통화 기준이며 경제적 통화 노출은 아니다. Sector 비중은 현금 포함 총가치가 분모다. 금액 합계는 정확하나 순환소수 비율의 합계에는 기존 Decimal 나눗셈 정밀도 수준의 잔차가 있을 수 있다. Phase 4 정책 평가는 평가액을 한도와 직접 비교한다.
+
+### Phase 4 현재 보유 Policy 평가
+
+```text
+Ledger → replay → Market Data 검증 → USPortfolioAnalyzer
+       → PortfolioAnalysis → PortfolioPolicyEngine → PortfolioPolicyReport
+```
+
+`domain/policy.py`는 frozen 설정·대상·한도·평가·보고서 모델과 PASS/WARN/BREACH/UNKNOWN 상태를 정의한다. `application/policy_config.py`는 인간 소유 TOML의 percentage points를 Decimal ratio로 읽고 allocation 합계, range, 위험 한도를 검증한다. `application/us_portfolio_policy.py`는 `PortfolioAnalysis`와 주입된 `PortfolioPolicyConfig`만 받아 판정한다. Repository, Provider, Ledger, clock 참조가 없다. Policy 설정 파일에 없는 Sector warning 수치는 만들지 않는다.
+
+개별 자산은 asset_id별 STOCK/ETF 직접 보유 평가액, Direct Sector는 분류된 STOCK의 평가액만 사용한다. ETF Sector label은 Direct Sector나 look-through 정보가 아니다. 미분류 STOCK은 별도의 typed 대상과 `UNKNOWN` 상태로 보존한다. 현금을 포함한 USD 총가치를 분모로 사용하며, Decimal 평가액을 `threshold × total_value_usd`와 비교하므로 표시용 rounding과 순환소수 비율의 근사치가 판정을 바꾸지 않는다. Concentration warn/breach는 이상, Cash Range 경계는 포함이다.
+
+Phase 3는 stale quote/FX를 분석 생성 전에 거부한다. Policy Engine은 재조회·시장 시간 계산을 하지 않으며, 전달된 freshness 플래그가 거짓이면 `UNKNOWN`으로 평가한다. 빈 계좌의 0 총가치에서는 Cash Ratio가 `UNKNOWN`, 존재하지 않는 자산·Sector 정책은 `not_applicable`이다. 현금만 있는 계좌는 Cash Range만 평가한다. 보고서의 policy_version과 이유 코드·타입 대상·실제값·한도는 이후 AI 설명 계층의 읽기 전용 입력이 될 수 있다. 이는 주문 승인이나 리밸런싱 명령이 아니다.
 
 ## 3. 미국 분석과 네 포트폴리오
 
@@ -93,7 +106,7 @@ flowchart TD
 
 ## 4. 인간 Policy와 AI 경계
 
-Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4에서 단위·합계·범위·한도 간 일관성 등을 검증하는 설정 loader와 evaluator를 만든다.
+Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고, evaluator는 현재 보유 자산 집중도·직접 Sector 집중도·Cash Range만 판정한다. Core/Growth ETF Target Range 및 전체 STOCK 한도는 해당 분류·운영 계약이 정해질 때 추가한다.
 
 향후 application은 인간이 승인한 Policy 버전을 읽어 Risk Engine에 전달한다. AI에는 분석에 필요한 읽기 전용 데이터만 제공하며, Policy 저장소 쓰기 권한과 Broker credentials를 제공하지 않는다. Policy 변경 경로는 AI 제안 경로에서 분리하고 인간의 변경 이력과 적용 시점을 남긴다. 이를 강제하는 구체적 권한 구조는 OD-02에서 결정한다.
 

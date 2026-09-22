@@ -4,7 +4,7 @@
 
 이 문서는 `ai-asset-copilot`의 **authoritative specification**이다. 요구사항 충돌 시 이 문서를 기준으로 해결하며, 정책 변경은 인간의 명시적 결정으로 반영한다. README는 진입 안내, Architecture는 설계 설명, Roadmap은 단계별 작업 범위를 제공한다.
 
-현재 구현 완료 단계는 **Phase 3 — US Portfolio Analytics**다. 계좌별 Ledger와 Market Data를 application 계층에서 연결해 미국 USD 계좌의 현재 상태를 분석한다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
+현재 구현 완료 단계는 **Phase 4 — US Portfolio Policy Engine**이다. Phase 3의 미국 USD 계좌 현재 분석 결과에 인간 소유 Policy 설정을 적용해 보유 상태를 평가한다. 각 절의 Phase 0 산출물 설명은 당시 범위의 기록이다. AI·Broker·주문 경계는 여전히 향후 구현 요구사항이다.
 
 ## 2. 목적과 불변 원칙
 
@@ -53,7 +53,7 @@ Portfolio Policy는 **인간이 정한 장기 전략 정책**이다. AI는 Polic
 | Sector 최대 비중 | 35% |
 | 전체 Individual Stocks 최대 비중 | 30% |
 
-초기 값은 `config/us_portfolio_policy.toml`에 선언한다. 비율 단위는 percentage points로, `50`은 50%를 뜻한다. 향후 코드가 이 설정을 읽고 검증하며 수치를 Business Logic에 hard coding하지 않는다. 정책 요구사항과 초기 설정 값은 함께 검토·변경한다.
+초기 값은 `config/us_portfolio_policy.toml`에 선언한다. 비율 단위는 percentage points로, `50`은 50%를 뜻한다. Phase 4 loader가 이 설정을 읽고 검증하며 수치를 Business Logic에 hard coding하지 않는다. 정책 요구사항과 초기 설정 값은 함께 검토·변경한다. 이번 평가기는 개별 직접 보유 자산, 직접 STOCK Sector, Cash Range를 다룬다. Core/Growth ETF 분류, 전체 개별 STOCK 한도와 Target Range 평가는 분류·운영 계약이 정해질 때 추가한다.
 
 설정 파일에 쓰인 version은 추적용 식별자다. 파일만으로 수정 권한이 강제되지는 않는다. 향후 AI의 쓰기 권한을 차단하고, 인간의 승인·정책 버전·적용 시점·변경 이력을 보존해야 한다. 과거 판단과 시뮬레이션에는 당시 정책 버전을 연결한다.
 
@@ -206,7 +206,7 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 | ID | 미결정 사항 | 결정 시점 |
 | --- | --- | --- |
 | OD-01 | Phase 1 확정: Decimal만 사용, 중간 통화 반올림 없음, 이동 가중평균 원가, 매수 수수료 원가 포함·매도 수수료 실현손익 차감, 불투명 문자열 ID, 시간대가 있는 금융 이벤트 시각과 계좌별 기록 sequence. Phase 3 현재 분석에는 명시적 `evaluated_at`과 개별 quote `as_of`를 보존한다. 미결정: 표시·Broker·세금 반올림, 역사적 성과용 FX·가격 시점 기준, 추가 기업행사 | Phase 1·3 일부 확정; 나머지는 해당 Phase에서 결정 |
-| OD-02 | 자산·Sector 분류와 ETF look-through, 비중 분모, Risk 한도 적용 대상, 경계값 포함 여부, 리밸런싱 트리거·거래 우선순위, 위반 상태 복구, 인간 Policy 변경 승인·버전 적용 방식 | Phase 4; Shadow 실행 전 |
+| OD-02 | Phase 4 현 보유 상태 평가 확정: 직접 보유 자산과 직접 분류 STOCK Sector, 현금 포함 총가치 분모, concentration 경고·위반은 한도 이상, Cash Range는 양 끝 포함. 미결정: Core/Growth ETF 분류, ETF look-through, 전체 STOCK 한도 및 Target Range 적용, 리밸런싱 트리거·거래 우선순위, 위반 상태 복구, 인간 Policy 변경 승인·버전 적용 방식 | Phase 4 일부 확정; 나머지는 Shadow 실행 전 |
 | OD-03 | Benchmark 자산, 초기 자본·입출금 대응, 배당 재투자, TWR/MWR 등 수익률 기준, 비교 통화·기간·체결 가정, Sharpe 무위험 수익률·연율화, 집중도 정의 | Phase 3–5 |
 | OD-04 | Phase 2 확정: 첫 Market Data adapter는 Twelve Data, 내부 계약은 provider-neutral, 가격·FX quote의 출처·통화·시점 및 오류 경계 정의. 미결정: 데이터 라이선스·지연·수정주가·상장폐지 종목·point-in-time coverage의 투자용 적합성, 투자용 freshness threshold, AI Provider·모델과 개인정보 전송 범위 | Market Data 일부 Phase 2 확정; 투자 사용 전 데이터 검증, AI: Phase 7 |
 | OD-05 | 한국 시장 Commission·Tax·Slippage, 체결·호가·유동성·Partial Fill 모델, Market Hours, 결제·가용 현금 규칙, Position/Daily Loss Limit 수치·기준 | Phase 8; Phase 9–10 전에 검증 |
@@ -268,5 +268,15 @@ Phase 3는 현재 상태 분석이다. 과거 가격·계좌 snapshot 이력이 
 - 검증에 사용한 불변 Quote 자체를 보존하여 가격과 provenance를 같은 observation에 묶는다. Provider의 반환 mapping이 이후 갱신되어도 분석 결과의 출처·시각이 바뀌지 않는다. 요청하지 않은 extra quote는 무시하며 필수 quote의 누락은 계속 거부한다.
 - 빈 계좌도 현재 결과 계약상 유효한 USD/KRW 환율과 provenance를 제공하므로 FX 조회·검증을 수행한다. 0 USD = 0 KRW라는 산술에 환율이 필요한 것은 아니다. FX 장애 시 빈 계좌 분석도 실패하는 제약을 유지하며, 환율을 1 또는 0으로 꾸미지 않는다. 향후 FX 없는 분석을 지원하려면 환율·출처·freshness의 부재를 명시하는 별도 계약이 필요하다.
 - Direct Sector의 비중 분모는 **현금을 포함한 계좌 총가치**다. 직접 분류 STOCK + 미분류 STOCK + ETF 평가액은 투자자산 평가액과 일치한다. `usd_exposure`는 계좌 평가 통화의 비중이며, 기업 매출 통화나 ETF 내부 자산의 경제적 FX 노출을 측정하지 않는다.
-- 각 exposure는 해당 평가액 / 계좌 총가치다. 금액 합계는 정확하게 보존하지만 순환소수 비율은 17절의 Decimal 나눗셈 정밀도를 따르므로 비율 합계의 미세한 잔차는 가능하다. 합계를 1로 만들려고 특정 분류의 비중을 임의 보정하지 않는다. Policy 경계값 비교 방식은 OD-02에서 정한다.
+- 각 exposure는 해당 평가액 / 계좌 총가치다. 금액 합계는 정확하게 보존하지만 순환소수 비율은 17절의 Decimal 나눗셈 정밀도를 따르므로 비율 합계의 미세한 잔차는 가능하다. 합계를 1로 만들려고 특정 분류의 비중을 임의 보정하지 않는다. Phase 4 Policy는 평가액과 한도의 곱을 직접 비교한다.
 - Provider의 `MarketDataError` 하위 오류는 원인을 보존하여 그대로 전파한다. 계좌·관측의 의미 검증 실패는 `AnalysisError`, Ledger 불변식 위반은 기존 replay의 `ValueError`다. Repository의 저장소 장애는 그 계층의 오류로 전파한다. 실패 시 부분 분석이나 가상 가격을 반환하지 않는다.
+
+## 20. Phase 4 Portfolio Policy 평가 계약
+
+`PortfolioPolicyEngine`은 불변 `PortfolioAnalysis`와 불변 `PortfolioPolicyConfig`만 사용해 불변 `PortfolioPolicyReport`를 만든다. Repository, MarketDataProvider, Ledger, 현재 시각을 읽거나 수정하지 않는다. 보고서에는 계좌 ID, 분석의 `evaluated_at`, 인간 Policy 버전, 각 평가의 정책 종류·typed 대상·실제 비율·적용 한도·상태·이유 코드/설명 및 정책별 미적용 목록을 보존한다. 같은 입력의 결과는 동일하다. 이후 AI 설명 계층은 이 결과를 읽을 수 있지만 판정과 설정을 변경하지 않는다.
+
+개별 직접 보유 STOCK/ETF는 각각 asset_id로 평가한다. 직접 Sector는 `PortfolioAnalysis.direct_sector_exposure`의 분류된 STOCK만 평가하며 ETF는 포함하지 않는다. 미분류 STOCK 평가액이 있으면 별도 `UNCLASSIFIED_STOCK` 대상을 `UNKNOWN`으로 보고한다. 이는 Sector 한도 위반을 뜻하지 않는다. ETF holdings look-through는 지원하지 않는다. 모든 비중의 분모는 현금을 포함한 USD 계좌 총가치다.
+
+Concentration은 `실제 평가액 >= breach_ratio × 총가치`이면 `BREACH`, 그렇지 않고 `실제 평가액 >= warn_ratio × 총가치`이면 `WARN`, 그 아래는 `PASS`다. 명시적 Sector warning이 없는 기존 설정에는 warning 구간을 임의로 만들지 않는다. Cash Range는 `cash < min_ratio × 총가치` 또는 `cash > max_ratio × 총가치`이면 `BREACH`이며 두 경계값과 그 사이는 `PASS`다. 비교는 모두 Decimal 평가액과 한도의 곱으로 수행한다. 보고용 실제 비율도 평가액과 총가치에서 계산하며, 표시용 rounding이나 순환소수 나눗셈 결과로 경계 판정을 하지 않는다.
+
+Phase 3는 stale/미상 가격 또는 FX를 거부해 `PortfolioAnalysis`를 만들지 않는다. 신선도 통과 플래그가 거짓인 분석이 전달되면 정책은 `UNKNOWN`으로 표시하고 `PASS`로 대체하지 않는다. 총가치 0이면 Cash Ratio는 `UNKNOWN`이고, 대상 자산·직접 Sector가 없으면 해당 정책은 `not_applicable`에 나타난다. 현금만 있는 계좌에서는 Cash Range를 평가하고 자산·Sector는 미적용이다. `UNKNOWN`과 미적용은 서로 다른 의미다. 정책 설정 TOML은 percentage points에서 Decimal ratio로 변환해 합계·범위·한도를 검증한다. 실제 운영용 quote/FX freshness 한도, 정책 승인·변경 이력·적용 시점은 여전히 별도 결정 사항이다.
