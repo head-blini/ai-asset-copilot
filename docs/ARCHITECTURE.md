@@ -1,6 +1,6 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. **main의 현재 구현은 Portfolio Foundation, Market Data 정규화, 현재 미국 계좌 분석이다.** `feat/phase-4-policy-engine`과 후속 P4-05 Policy evaluator는 미병합 후보이며 현재 main의 기능이 아니다. Budget/Cashflow의 BUD-01 순수 계산·오프라인 보고도 이 별도 브랜치의 **미병합 후보**다. AI·Risk·Execution·Broker·웹·운영 흐름은 향후 설계다. main의 정책 설정 파일은 아직 실행 코드에서 읽지 않는다.
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. **main의 현재 구현은 Portfolio Foundation, Market Data 정규화, 현재 미국 계좌 분석과 BUD-01 오프라인 계산기다.** `feat/phase-4-policy-engine`과 후속 P4-05 Policy evaluator는 미병합 후보이며 현재 main의 기능이 아니다. Budget/Cashflow의 BUD-01 순수 계산·오프라인 보고는 main에 병합됐다. AI·Risk·Execution·Broker·웹·운영 흐름은 향후 설계다. main의 정책 설정 파일은 아직 실행 코드에서 읽지 않는다.
 
 ## 1. 공통 Domain과 의존성
 
@@ -26,7 +26,7 @@ flowchart LR
 | --- | --- | --- |
 | `domain` | 공통 식별자·금융 개념·불변식·provider/repository 계약 | 외부 SDK와 저장소 구현에 독립 |
 | `portfolio` | 투자 계좌·포지션·Transaction Ledger·현금과 평가·손익 계산 | 계산 결과의 근거와 시점 보존 |
-| 후보 `budget` | 개인 재무 기록·예정 현금흐름·월 예산의 순수 계산 | 투자 Transaction Ledger와 별도 기록; BUD-01은 AI·DB·Broker 독립 |
+| `budget` | 개인 재무 기록·예정 현금흐름·월 예산의 순수 계산 | 투자 Transaction Ledger와 별도 기록; BUD-01은 AI·DB·Broker 독립 |
 | `application` | Repository·Market Provider를 조합한 현재 미국 계좌 분석 | 관측 시점·통화·신선도 확인 후 순수 계산 호출 |
 | `market` | 가격·FX·시장 상태의 조회 계약과 정규화 | 외부 API adapter와 순수 데이터 검증 분리 |
 | `research` | Research 자료, Investment Thesis, Decision Journal | 당시 근거와 사후 결과를 구분 |
@@ -46,9 +46,9 @@ flowchart LR
 
 공통 금액·통화·시점·출처 규칙은 재사용한다. 모든 금액은 `Decimal`이고 통화 및 유효 시점·기록 시점·출처를 보존한다. 다른 통화를 출처 없는 환율로 더하지 않고, 값 누락을 0으로 변환하지 않는다. 기존 보호자금 잔액은 `balance_date`의 보호총액 스냅샷이며 신규 소득이 아니다. 예산 배정은 현금 이동 사실이 아니므로 실제 이동 관측과 대사 전에는 완료로 기록하지 않는다. 개인정보·계좌 식별자·토큰은 최소 수집·표시하고 저장소와 로그에 실제 값을 넣지 않는다.
 
-후보 `budget.monthly.calculate_month`는 개인 1명/KRW/월 단위의 **검증 가능한 순수 함수**다. 수동 입력된 실수령 입금·확정 예정 입금, 개시 가용현금, 날짜별 지출·상환, 이미 사용·예약한 금액, 목표와 사용자 예산 정책을 입력받아 월 배정안·미배정액·부족액·날짜별 현금 부족·판단 불가 사유를 반환한다. 미확정 수입, 대출, 미실현 투자이익을 확정 재원에 섞지 않는다. AI·DB·Broker·clock에 의존하지 않고 기준 월·평가 시점은 호출자가 명시한다. 월초 계획과 월중 관측 잔액에서 시작하는 계산을 분리하며 계산 결과에 입력의 출처·시각을 연결한다. `cash_days`는 일마감 추정이며 장중 순서를 보장하지 않는다. 저장·버전·정정은 BUD-02, 실제 자금 연결은 BUD-03에서 별도로 검증한다.
+`budget.monthly.calculate_month`는 개인 1명/KRW/월 단위의 **검증 가능한 순수 함수**다. 수동 입력된 실수령 입금·확정 예정 입금, 개시 가용현금, 날짜별 지출·상환, 이미 사용·예약한 금액, 목표와 사용자 예산 정책을 입력받아 월 배정안·미배정액·부족액·날짜별 현금 부족·판단 불가 사유를 반환한다. 미확정 수입, 대출, 미실현 투자이익을 확정 재원에 섞지 않는다. AI·DB·Broker·clock에 의존하지 않고 기준 월·평가 시점은 호출자가 명시한다. 월초 계획과 월중 관측 잔액에서 시작하는 계산을 분리하며 계산 결과에 입력의 출처·시각을 연결한다. `cash_days`는 일마감 추정이며 장중 순서를 보장하지 않는다. 저장·버전·정정은 BUD-02, 실제 자금 연결은 BUD-03에서 별도로 검증한다.
 
-이 후보의 `balance_date`는 관측 잔액을 재생하기 시작하는 날짜이고, `evaluated_at`은 KST 기준 현재 날짜 및 기록 사용 가능 시각이다. 관측 기록은 평가 시각 뒤에서 가져올 수 없다. 지난 예정 소득은 실제 입금으로 승격하지 않고 미확인 사유로 남긴다. `current_cash`는 평가 시점까지 관측된 입출금만 반영하며, `cash_days.ending_cash`는 과거 확인 기록 및 오늘·미래의 예정 현금 경로다. `original_plan_margin`은 월초 잔액이 주어졌을 때 그 잔액과 공급된 정책으로 계산한 원안 시나리오다. `allocation_margin`·`unallocated`·`shortage`는 현재 확인된 현금에서 기존 보호액, 미집행 계획·추가 예약, 미납 카드대금을 차감한 현재 잔여 판단이다. `expected_allocation_margin`은 미래 예정 소득을 더한 별도 전망이다. 계획 총액은 `AllocationResult.planned`에 보존하고 신규 투자 제안은 사용·예약 후의 투자 잔여액만 합산한다. 카드 사용은 소비·예산 사용이고 연결된 카드 납부는 현금 지급이므로, 지급 전 카드대금만 현재 약속에서 별도 차감한다.
+BUD-01의 `balance_date`는 관측 잔액을 재생하기 시작하는 날짜이고, `evaluated_at`은 KST 기준 현재 날짜 및 기록 사용 가능 시각이다. 관측 기록은 평가 시각 뒤에서 가져올 수 없다. 지난 예정 소득은 실제 입금으로 승격하지 않고 미확인 사유로 남긴다. `current_cash`는 평가 시점까지 관측된 입출금만 반영하며, `cash_days.ending_cash`는 과거 확인 기록 및 오늘·미래의 예정 현금 경로다. `original_plan_margin`은 월초 잔액이 주어졌을 때 그 잔액과 공급된 정책으로 계산한 원안 시나리오다. `allocation_margin`·`unallocated`·`shortage`는 현재 확인된 현금에서 기존 보호액, 미집행 계획·추가 예약, 미납 카드대금을 차감한 현재 잔여 판단이다. `expected_allocation_margin`은 미래 예정 소득을 더한 별도 전망이다. 계획 총액은 `AllocationResult.planned`에 보존하고 신규 투자 제안은 사용·예약 후의 투자 잔여액만 합산한다. 카드 사용은 소비·예산 사용이고 연결된 카드 납부는 현금 지급이므로, 지급 전 카드대금만 현재 약속에서 별도 차감한다.
 
 `unpaid_card_due`는 관측된 이번 달 카드 사용 중 연결된 **관측 결제**가 없는 금액이다. 납부 일정이 입력되지 않았어도 이 금액을 현재 잔여 판단과 사용일 이후의 날짜별 가용액에서 한 번 차감하고 `card_payment_date:<charge id>`를 필요한 입력으로 표시한다. 일정만 입력된 결제는 아직 관측 결제로 보지 않는다. 예정 지급일 이후의 현금 전망에서는 지급액을 현금에서 차감하고 그 카드 의무 보호액을 해제해 이중 차감을 피한다. 월 밖 납부일은 BUD-01의 한 달 입력에 기록할 수 없으므로 미정 일정과 마찬가지로 이번 달 지급 사실을 만들지 않되 의무 금액은 유지한다. `CashDay.ending_cash`는 일정 없는 카드 지급을 임의 날짜에 차감하지 않는다.
 

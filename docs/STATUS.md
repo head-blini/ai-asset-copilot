@@ -1,21 +1,31 @@
 # Asset Copilot — Project Status
 
-Last local verification: 2026-09-25 KST. Canonical repository: `head-blini/ai-asset-copilot`. Remote refs were queried with `git ls-remote` on 2026-09-25. This **unmerged BUD-01 code candidate** is based on PR #3's documentation branch, which depends on unmerged R0 PR #1. The current merged `main` document/code state remains at the base SHA below. Budget/Cashflow is a new product scope; only its BUD-01 offline calculator is a candidate, not a deployed feature.
+Last verified: 2026-09-25 KST. Canonical repository: `head-blini/ai-asset-copilot`. PR #1 → #3 → #4 were reviewed, tested against their then-current main, and merged in that order. The status update itself is a separate documentation PR; its own checkout and CI are reported with that PR.
 
 ## Ref and phase state
 
-| Ref / scope | SHA and merge state | What it establishes |
+| Ref / scope | Reviewed head and adopted merge | Current result |
 | --- | --- | --- |
-| `origin/main` | `0071d2b074be686392348ad6fbeec47d596e90de`, R0 base | Phase 0–3 code merged; Ledger, Market Data and current US analysis. No Policy API on main |
-| `origin/feat/phase-4-policy-engine` | `089ee027bbdb03557d83cb081e0acd35694c23fe`, 4 commits ahead / 0 behind base, unmerged | Candidate Policy implementation; corrected code at `36eafe8e80d433fdf2f728b14a34be072ce67233`, later HEAD changes docs |
-| `chore/project-rebaseline` | PR #1 head `9cd1a0f52b457352fca7d76500daac57d9dbdd25`, from `0071d2b`; open/unmerged | R0 documentation and pytest CI only; no Policy implementation. This Budget document branch starts here |
-| `feat/p4-allocation-completion` | PR #2 head `d1beb1b8e0cfc25371ed2dc6954cd85bf18e12f0`, based on `089ee02`; open/unmerged | P4-05 review correction and CI candidate, separate from R0 and this Budget document branch |
-| `docs/budget-cashflow-scope` | PR #3 head `d58a4d32d217998697ff7e3706ded1e8e91631c8`, based on R0; open/unmerged | Budget scope and subsequent home/retirement/access decisions; this BUD-01 candidate starts at exactly this SHA |
-| `feat/budget-monthly-foundation` | PR #4 protection-review starting head `d0a5f2b3beefaab2a935f148167cf87b4170acd3`; protection code/test commit `f1719e1d93698b86d48ddd0fc78bb94615386f4a`; latest PR head and CI are checked separately | BUD-01 pure calculator and seven offline examples only; PR #3 remains the base, no BUD-02/03 implementation |
+| `main` after PR #4 | `326b5da1ee28011478b6889c4ee89bdfe548d4fe` | Phase 0–3 and BUD-01 offline calculator on main; no Policy implementation or live funds connection |
+| PR #1 R0 | reviewed head `9cd1a0f52b457352fca7d76500daac57d9dbdd25`; merge `bbfcc91ad8bed8ff2ede740ecbef11fdc61bab06` | MERGED; documentation and pytest CI |
+| PR #3 Budget scope | reviewed head `d58a4d32d217998697ff7e3706ded1e8e91631c8`; integration head `275db6f28534f7b6b1dd87d039fa86ed0ee1d305`; merge `387da7b5616351dd32b58a5f95299ca57809bf7d` | MERGED; specification, architecture and roadmap scope only |
+| PR #4 BUD-01 | reviewed head `4b8b5202ac2933305aeabc2e91f56989719045aa`; integration head `752d487f17f086b4561a6c27ff1d71d7df5bb1a5`; merge `326b5da1ee28011478b6889c4ee89bdfe548d4fe` | MERGED; integration Git tree `dd3c846de1132eb7ad06b3200d7660d188a9dfc8` equals reviewed tree |
+| PR #2 P4-05 | head `d1beb1b8e0cfc25371ed2dc6954cd85bf18e12f0` | OPEN, separate unmerged candidate |
+| Policy candidate | head `089ee027bbdb03557d83cb081e0acd35694c23fe` | Separate unmerged candidate |
 
-Phase 0–3: **DONE on main**. Phase 4 — **US Portfolio Policy: IN REVIEW / NOT DONE**. P4-05 has a separate review candidate but is not merged or accepted; P4-06/07/09 remain open. Phase 5–13 remain PLANNED; Phase 5 US Shadow Engine does not start while Phase 4 blockers remain. R0 review and any R0 merge are independent of Phase 4 completion. Candidate's earlier DONE statement was withdrawn because original Phase 4 criteria were not all met.
+Phase 0–3: **DONE on main**. BUD-01: **DONE for its offline, manual-input calculation and report gate** after code review, 205 passing tests, seven offline examples, PR CI and main merge. BUD-02/03/04: **PLANNED / NOT IMPLEMENTED**. Phase 4: **IN REVIEW / NOT DONE**; P4-05 is separate, and P4-06/07/09 remain OPEN. Phase 5–13 remain PLANNED. This status grants no web deployment, real-account import or reconciliation, operational validation, reservation lifecycle, approval, transfer, FX conversion or order authority. User goal amounts, budget policy and risk limits remain undecided.
 
-## Verification ledger
+## Adoption verification (2026-09-25)
+
+| Stage | Local clean checkout | CI checkout and result |
+| --- | --- | --- |
+| PR #1 / main | PR checkout `3d1aa49128bfaaab40969410266cc79660c89562`: 133 passed, pip and diff checks clean | [PR run 36101472221](https://github.com/head-blini/ai-asset-copilot/actions/runs/36101472221) on `3d1aa49…`: 133 passed; [main run 36144174307](https://github.com/head-blini/ai-asset-copilot/actions/runs/36144174307) on `bbfcc91…`: 133 passed; both pip checks clean |
+| PR #3 / main | PR checkout `35ea62246f3296392296b4a9dcb0758682457197`: 133 passed, pip and diff checks clean; 21 relative document links resolve | [PR run 36144404363](https://github.com/head-blini/ai-asset-copilot/actions/runs/36144404363) on `35ea622…`: 133 passed; [main run 36144536258](https://github.com/head-blini/ai-asset-copilot/actions/runs/36144536258) on `387da7b…`: 133 passed; both pip checks clean |
+| PR #4 / main | PR checkout `833c2def3c794930966e858308fd3b926b49efea` and main `326b5da…`: each 205 passed, pip and diff checks clean; each ran all seven offline scenarios; editable import resolved to its own checkout | [PR run 36144636156](https://github.com/head-blini/ai-asset-copilot/actions/runs/36144636156) on `833c2de…`: 205 passed; [main run 36144771179](https://github.com/head-blini/ai-asset-copilot/actions/runs/36144771179) on `326b5da…`: 205 passed; both pip checks clean |
+
+The local checks used Python 3.11.15 and pytest 9.1.1 in separate `.venv` worktrees. The Actions runs used Ubuntu Python 3.11.16. Older runs below are historical results tied to their own checkout; they are not evidence for the adopted main.
+
+## Historical verification ledger
 
 | Code actually tested | Environment and command | Result | Limit |
 | --- | --- | --- | --- |
@@ -48,7 +58,7 @@ The starting PR #4 head reproduced the review failures in this worktree before e
 
 이번 후속 리뷰의 세 문제는 같은 `monthly.py` blob `b40da0944b6e0391852dd5b9ada2a18d37a50b2c`를 쓰는 저장소 `.venv`에서 독립 재현했다. 카드 사용 900에 납부 일정이 없으면 수정 전 현재 현금 1000, margin 500, 투자 제안 500으로 의무가 사라졌고, 연결된 28일 예정 지급에서는 margin -400이었다. 수정 후 현금 소비·미결제 카드·예정 지급·관측 결제 모두 같은 현재 margin -400이며, 미결제액 900은 관측 결제 전까지 유지된다. 날짜가 없으면 `card_payment_date`와 사유를 반환하고 예정 지급을 실제 지급으로 승격하지 않는다. 같은 현재 현금 1000과 생활비 예약 200에서는 수정 전 월초 재생만 과거 일별 가용액 -100으로 투자 제안을 막았으나, 수정 후 월초·11일·25일 잔액 시작 모두 현재 제안 500에 일치한다. 과거 실제 부족 -50은 과거 날짜에 남으며 현재 조건에 소급하지 않는다. 납입이 관측된 완료 목표의 불필요한 검사 `None`은 `NOT_REQUIRED`로 구분해 제안 500을 허용하고, 잔여 목표가 양수인 부분/미확인 납입은 필요한 확인과 이유를 반환하며 제안을 보류한다. 기존 테스트 두 곳의 과거 `available_cash` 기대값은 현재 예약을 과거에 소급하던 0에서 실제 과거 현금 700으로 수정했고 평가일의 예약 후 가용액 0을 추가 검증했다. 나머지 기존 테스트와 일곱 예제는 유지했다. 월 밖 납부일 입력, 지속 저장, 실제 계좌 대사 및 이체는 여전히 BUD-01 범위 밖이다.
 
-No API key, real account, live Broker, or external Market Data call is required by these pytest runs. Local tests and GitHub Actions are separate results tied to their exact SHA. PR #1's `c37ca41` rows are historical; its actual current head is `9cd1a0f` with separate run `36101472221`. PR #3's `82b482d` run is historical after this new document revision.
+No API key, real account, live Broker, or external Market Data call is required by these pytest runs. Local tests and GitHub Actions are separate results tied to their exact SHA. PR #1 and PR #3 pre-adoption rows below describe historical heads and must be read with the adoption verification above.
 
 ## Candidate Phase 4 acceptance review
 
@@ -59,14 +69,14 @@ The [ROADMAP P4 gate](ROADMAP.md#phase-4-canonical-acceptance-criteria) retains 
 | Evidence type | 2026-09-25 observation | Boundary |
 | --- | --- | --- |
 | User request | Personal income-based monthly Budget/Cashflow Planning, actuals comparison, savings and investment funding proposals added to product scope | Requested scope, not feature completion or permission to move funds |
-| Code inspection | main's `domain/models.py` has investment-account `DEPOSIT`/`WITHDRAW`; `storage/sqlite.py` and tests cover that Ledger. No personal income/expense or budget calculator found on main | Existing investment Ledger cannot be represented as a personal cashflow Ledger without a new contract |
-| Document proposal | PROJECT_SPEC, ARCHITECTURE and ROADMAP on PR #3 define BUD-01~04 and financial/authority boundaries | R0 and PR #3 are unmerged; product decision does not grant financial authority |
-| Code candidate | This branch adds a pure `budget.monthly` API, synthetic manual input and offline report | Candidate only, not main, no DB/provider/approval/transfer/order connection |
-| Tests and CI | Exact-sha local code test above; PR #1/#2/#3 CI are separate. correction PR-head CI and its checkout SHA are verified separately in PR #4 | Documentation review, code inspection, local tests and CI are distinct evidence |
+| Code inspection | `domain/models.py` and `storage/sqlite.py` contain the investment Ledger; `budget.monthly` now provides a separate, pure monthly calculator on main | The investment Ledger is not a personal income/expense store |
+| Adopted documents | PR #3 defines BUD-01~04 and financial/authority boundaries in PROJECT_SPEC, ARCHITECTURE and ROADMAP | Product scope grants no financial authority |
+| Adopted code | PR #4 adds `budget.monthly`, synthetic manual input and offline report to main | No DB/provider/approval/transfer/order connection |
+| Tests and CI | The adoption table above ties local and CI checks to each PR and main SHA | PR #2 evidence remains separate |
 
 The user subsequently identified **home purchase and retirement** as asset-growth purposes. Goal amount, timing, loss tolerance and personalized strategy remain unknown; “more money is better” is not risk approval. Mobile/PC web is the planned primary interface, Telegram is limited to alerts and allowed simple lookups, and a separate Mac mini program is the initial execution setting. This is a product decision, not an implemented web service, deployment, approval system or live-money permission. BUD-01 must report known cashflow when goals are undefined and must not call all remaining cash investable.
 
-BUD-01 has an **IN REVIEW candidate / NOT DONE**; BUD-02~04 are **PLANNED / NOT IMPLEMENTED**. BUD-01 is independent of P4-06/07; its input/output, offline example and test gates remain in [ROADMAP](ROADMAP.md#bud-01-다음-코드-작업-계약). User policy amounts and approval settings remain unset in [OD-15~19](../PROJECT_SPEC.md#15-open-decisions). No bank, card, Toss, live account, web, approval, transfer or order capability is inferred from this candidate.
+BUD-01 is **DONE for the offline, manual-input gate on main**; BUD-02~04 are **PLANNED / NOT IMPLEMENTED**. BUD-01 is independent of P4-06/07; its input/output, offline example and test gates remain in [ROADMAP](ROADMAP.md#bud-01-다음-코드-작업-계약). User policy amounts and approval settings remain unset in [OD-15~19](../PROJECT_SPEC.md#15-open-decisions). No bank, card, Toss, live account, web, approval, transfer or order capability is inferred from this offline calculator.
 
 ## User path and current limits
 
@@ -80,8 +90,8 @@ BUD-01 has an **IN REVIEW candidate / NOT DONE**; BUD-02~04 are **PLANNED / NOT 
 
 The M1 input → validation/reconciliation → Ledger → observed prices/FX → analytics → approved Policy → provenance-aware minimal report path is a **plan**, not a current product capability. M1 report ordering is pending review; Phase 11's full Dashboard/Daily/Weekly scope remains. Account input method, Broker capability (including Toss), trading cadence, market data rights and live capital operation limits remain open decisions in PROJECT_SPEC. No real account fixture is committed.
 
-## R0 next work and blockers
+## Remaining work and blockers
 
-R0 review PR [#1](https://github.com/head-blini/ai-asset-copilot/pull/1) is open against `main` and remains unmerged. Its current head `9cd1a0f` has the successful run `36101472221`. Review M1 ordering and input/report dependencies before adopting the proposed sequence adjustment.
+R0 [PR #1](https://github.com/head-blini/ai-asset-copilot/pull/1), Budget scope [PR #3](https://github.com/head-blini/ai-asset-copilot/pull/3), and BUD-01 [PR #4](https://github.com/head-blini/ai-asset-copilot/pull/4) are merged; their merge and verification evidence is above. M1 input/report delivery and real account validation remain separate work.
 
-The P4-05 candidate [PR #2](https://github.com/head-blini/ai-asset-copilot/pull/2) is in review without changing the Phase 4 gate. The next existing Policy code task after its review is a small design review and P4-06/07 implementation for policy history, human approval and AI write denial. Preserve the candidate branch history; after R0 merges, reconcile latest main normally, resolve documentation conflicts and rerun tests before Policy integration. R0's M1 ordering still needs review. Separately, review BUD-01's code and offline examples; this is not a replacement for P4-05 or permission to start BUD-02/03. Phase 4 remains blocked until P4-09; do not begin Phase 5 or enable live orders.
+The P4-05 candidate [PR #2](https://github.com/head-blini/ai-asset-copilot/pull/2) is in review without changing the Phase 4 gate. The next existing Policy code task after its review is a small design review and P4-06/07 implementation for policy history, human approval and AI write denial. Preserve the Policy candidate branch history; reconcile it with latest main and rerun tests before any separate Policy integration. BUD-01 adoption is not a replacement for P4-05 or permission to start BUD-02/03. Phase 4 remains blocked until P4-09; do not begin Phase 5 or enable live orders.
