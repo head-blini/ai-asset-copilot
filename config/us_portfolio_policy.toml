@@ -1,8 +1,9 @@
 # Human-owned initial policy; requirements: PROJECT_SPEC.md section 4.
 # Values use percentage points: 50 means 50%, not 0.50.
-# Phase 4 loader validates this file. Current-state evaluator uses individual
-# STOCK position, total STOCK, direct sector, and cash range limits.
-# Core/Growth allocation evaluation remains an OPEN Phase 4 acceptance criterion.
+# Phase 4 loader validates and retains all four allocation target/range bands.
+# The P4-05 candidate evaluates those bands from explicit ETF asset_id groups
+# alongside individual STOCK, total STOCK, direct sector, and cash risk checks.
+# P4-05 review and P4-06/07 approval/history remain open Phase 4 gates.
 # These fields are not an authorization mechanism. AI must never write policy.
 policy_version = "initial-v1"
 

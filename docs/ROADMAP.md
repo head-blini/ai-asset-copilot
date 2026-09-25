@@ -29,6 +29,19 @@ Phase 5의 AI Shadow는 저장되거나 수동 제공된 제안으로 실행 계
 
 Phase 12에 Broker credentials나 adapter가 존재해도 실주문 권한을 의미하지 않는다. 실전 주문 활성화는 Phase 13에서 다룬다. 미국 실제 포트폴리오는 전체 로드맵에서 분석·의사결정 보조 대상으로 유지한다.
 
+## 미국 계좌 하나의 첫 실사용 경로와 보완 순서
+
+첫 목표는 `검증된 미국 계좌 입력 → 잔고 대조 → 현재 자산 평가 → 승인된 Policy 결과 → 근거가 남는 최소 보고`다. 이는 현재 제공 기능이 아니라 Phase 1–4 결과를 실제 사용 경로로 연결할 보완 순서다. Phase 0–13의 번호와 완료 조건, Phase 11의 전체 Dashboard·Daily/Weekly Report 범위를 유지한다.
+
+1. **R0:** 별도 PR #1에서 기존 문서·CI 증거 정합성을 마무리한다. R0 문서 변경은 Policy 코드 변경과 분리한다.
+2. **이번 후보:** P4-05의 asset_id 기반 Core/Growth ETF 분류와 Core ETF·Growth ETF·Individual Stocks·Cash의 Target/Range 평가를 구현·검토한다.
+3. **다음:** P4-06/07의 정책 내용·버전·적용 이력, 인간 승인과 AI 쓰기 차단 경계를 작은 설계 검토 후 구현한다. P4-09의 전체 검토·main 병합 조건은 그대로 둔다.
+4. **그 이후:** 실제 입력 형식과 시작 상태, 중복 방지·정정·잔고 대조를 설계·검증한다.
+5. **그 이후:** 시장 세션 기반 신선도 기준과 분석 근거의 저장·재현·복원을 설계·검증한다.
+6. **그 이후:** 미국 계좌 하나의 검증된 입력부터 근거 있는 최소 보고까지 연결한다. Policy 결과는 Phase 4 완료 및 승인된 버전/적용 시점 확인 후 사용자 경로에 사용한다.
+
+R0은 아직 main에 병합되지 않았지만, P4-05는 기존 Policy 후보의 순수 평가 계약을 독립적으로 확장할 수 있어 R0 문서 검토가 끝날 때까지 후보 개발을 멈추지 않는다. 이 순서 조정은 R0을 건너뛰어 main에 병합하거나 Phase 4를 완료 처리하는 결정이 아니다. Toss 공식 문서 기반 조회 capability 조사는 독립 작업이며, 미결정 연동 때문에 P4-05를 중단하지 않는다. 실계좌 호출·주문 권한은 이 계획에 포함되지 않는다. Phase 5–13의 기존 순서와 완료 조건은 유지한다.
+
 ## Phase 1 권장 구현 범위
 
 Phase 1 구현 기준과 완료 검증 범위의 기록이다. OD-01과 OD-06 중 Foundation에 필요한 결정을 해결했다.
@@ -65,7 +78,7 @@ Backtest Integrity Audit, Broker / Execution Safety Audit, 실제 자금 연결 
 | P4-08 | 분석/정책 경계, 불변성, 결정론, Decimal 비교, 데이터 부족 시 UNKNOWN을 검증한다 | Repository/Provider/clock 없는 evaluator, 전체 회귀와 실패 경계 테스트 |
 | P4-09 | 모든 조건 PASS, review 완료, main merge/push 및 STATUS 갱신 | 실제 전체 테스트 결과, 정확한 SHA와 merge 확인 |
 
-ETF Core/Growth 분류와 정책 변경 이력·권한은 현재 미구현이면 **Phase 4 OPEN blocker**다. 임의의 분류·금융 수치·권한 모델로 채우지 않는다. ETF holdings look-through도 지원하지 않으며 직접 STOCK sector 정책의 범위를 유지한다. 이를 전체 ETF sector 위험이 검증되었다는 뜻으로 해석하지 않는다.
+P4-05의 Core/Growth 분류·배분 평가는 별도 후보에서 검토 중이며, 승인·병합 전에는 완료로 간주하지 않는다. 정책 변경 이력·권한은 **Phase 4 OPEN blocker**다. 임의의 분류·금융 수치·권한 모델로 채우지 않는다. ETF holdings look-through도 지원하지 않으며 직접 STOCK sector 정책의 범위를 유지한다. 이를 전체 ETF sector 위험이 검증되었다는 뜻으로 해석하지 않는다.
 
 ### 681ef60 완료 선언 감사
 

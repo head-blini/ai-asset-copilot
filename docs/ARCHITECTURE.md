@@ -106,7 +106,7 @@ flowchart TD
 
 ## 4. 인간 Policy와 AI 경계
 
-Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고, evaluator는 개별 STOCK 집중도·전체 STOCK 한도·직접 Sector 집중도·Cash Range를 판정한다. Loader는 모든 계층의 키를 확인해 unknown/missing key와 malformed 값을 거부한다. Core/Growth ETF 분류와 전체 allocation Target/Range 평가의 누락은 Phase 4 OPEN 항목이다. 변경 이력·권한·적용 시점도 ROADMAP의 Phase 4 완료 조건에 남으며 후속 Phase로 이관하지 않는다.
+Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고 네 자산군의 target/min/max를 불변 입력에 보존한다. Evaluator는 개별 STOCK 집중도·전체 STOCK 한도·직접 Sector 집중도·Cash Range와 별도의 네 자산군 배분 결과를 반환한다. ETF Core/Growth는 caller가 `asset_id`로 명시하며 ticker에서 추론하지 않는다. 중복·잘못된 분류는 거부하고 미분류 ETF나 불일치하는 분석 금액은 배분 결과의 `UNKNOWN` 이유로 남긴다. Range 경계는 양 끝 포함이고 목표 편차는 판정과 별도로 표시한다. 배분 PASS는 독립 Risk BREACH를 지우거나 전체 적합을 뜻하지 않는다. Loader는 모든 계층의 키를 확인해 unknown/missing key와 malformed 값을 거부한다. P4-05 후보는 검토 중이며 변경 이력·권한·적용 시점은 ROADMAP의 Phase 4 완료 조건에 남는다.
 
 향후 application은 인간이 승인한 Policy 버전을 읽어 Risk Engine에 전달한다. AI에는 분석에 필요한 읽기 전용 데이터만 제공하며, Policy 저장소 쓰기 권한과 Broker credentials를 제공하지 않는다. Policy 변경 경로는 AI 제안 경로에서 분리하고 인간의 변경 이력과 적용 시점을 남긴다. 이를 강제하는 구체적 권한 구조는 OD-02에서 결정한다.
 
