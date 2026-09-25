@@ -270,6 +270,8 @@ def test_linked_future_payment_consumes_one_reservation_without_double_charge():
     assert day(linked, 10).available_cash == D("0")
     assert (day(linked, 26).ending_cash, day(linked, 26).available_cash) == (D("0"), D("0"))
     assert day(separate, 26).available_cash == D("-700")
+    assert linked.allocation_margin == D("0")
+    assert separate.allocation_margin == D("-700")
     with pytest.raises(ValueError, match="reservation_draw exceeds"):
         calculate_month(replace(base, entries=base.entries +
                                 (replace(due, amount=D("800"), reservation_draw=D("800")),)))
@@ -286,6 +288,17 @@ def test_investment_plan_is_not_reproposed_after_full_reservation():
     assert line(result, C.US_INVEST).planned == D("500")
     assert line(result, C.US_INVEST).remaining == D("0")
     assert result.investment_proposal == D("0")
+
+
+def test_future_expense_over_plan_already_reduces_current_funding():
+    base = sample_input("overspend")
+    planned = replace(base.entries[0], day=date(2026, 9, 26), observed=False)
+    result = calculate_month(replace(base, entries=(planned,)))
+    assert result.current_cash == D("1000")
+    assert result.allocation_margin == D("-600")
+    assert result.shortage == D("600")
+    assert result.investment_proposal is None
+    assert day(result, 26).ending_cash == D("100")
 
 
 def test_overdue_salary_is_excluded_without_hiding_observed_income():

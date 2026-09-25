@@ -634,10 +634,27 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                     if entry.prior_period_card_payment or (linked_charge is not None
                             and linked_charge.observed):
                         prior_card_due = _add(prior_card_due, entry.amount)
+        future_unreserved: dict[tuple[BudgetCategory, str | None], Decimal] = {}
+        for entry in entries:
+            if entry.observed or entry.day < evaluation_day:
+                continue
+            if entry.kind in SPEND_KINDS:
+                key = (entry.category, None)
+            elif entry.kind is EntryKind.DEBT_PRINCIPAL:
+                key = (BudgetCategory.DEBT_PRINCIPAL, None)
+            elif entry.kind is EntryKind.DEBT_COST:
+                key = (BudgetCategory.DEBT_COST, None)
+            else:
+                continue
+            future_unreserved[key] = _add(
+                future_unreserved.get(key, ZERO),
+                _sub(entry.amount, entry.reservation_draw))
         remaining_plan = original_plan = ZERO
         for line in allocation_results:
+            key = (line.category, line.goal_id)
             remaining_plan = _add(remaining_plan,
-                                  max(_sub(line.planned, line.used), line.reserved, ZERO))
+                                  max(_sub(line.planned, line.used),
+                                      _add(line.reserved, future_unreserved.get(key, ZERO)), ZERO))
             original_plan = _add(original_plan, max(line.planned, line.reserved))
         margin = _sub(_sub(_sub(current_cash, protected), remaining_plan), prior_card_due)
         expected_margin = _add(margin, future_income)
