@@ -25,7 +25,7 @@ python -m pytest
 .venv/bin/python examples/budget_monthly_offline.py --scenario all
 ```
 
-`normal`, `cash_gap`, `unknown_goal`을 각각 `--scenario`에 넣어 따로 실행할 수 있다. 입력은 [예제 파일](examples/budget_monthly_offline.py)의 `sample_input()`에서 수정한다. 보고의 월간 여유액은 명시된 가상 정책의 배정 차이이며 투자 가능액 승인이나 장중 잔고 보장이 아니다. 목표 필요 적립액의 두 자리 표시는 읽기 위한 반올림이며 API의 `Decimal` 결과는 반올림하지 않는다. 은행·카드·Toss, DB 저장, AI, 웹, 송금·주문 연결은 없다. 이 후보는 main 기능이 아니다.
+`normal`, `cash_gap`, `unknown_goal`, `overspend`, `extra_reservation`, `overdue_salary`, `goal_conflict`을 각각 `--scenario`에 넣어 따로 실행할 수 있다. 입력은 [예제 파일](examples/budget_monthly_offline.py)의 `sample_input()`에서 수정한다. 보고는 월초 원안, 확인된 현금 기준의 현재 여유·부족, 미래 예정 입금을 포함한 예상 여유, 목표 배정 후 날짜별 가용현금을 구분한다. 이 값과 신규 투자 제안은 승인이나 장중 잔고 보장이 아니다. 목표 필요 적립액의 두 자리 표시는 읽기 위한 반올림이며 API의 `Decimal` 결과는 반올림하지 않는다. 은행·카드·Toss, DB 저장, AI, 웹, 송금·주문 연결은 없다. 이 후보는 main 기능이 아니다.
 
 ## 문서
 
