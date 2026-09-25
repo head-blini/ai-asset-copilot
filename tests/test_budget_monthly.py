@@ -342,13 +342,13 @@ def test_goal_due_date_counts_only_future_opportunities_and_actual_savings():
             pending.contribution_status) == (2, D("600"), "OVERDUE_UNCONFIRMED")
     paid = replace(goal, saved_amount=D("300"), contributions=(GoalContribution(
         date(2026, 9, 5), D("300"), "synthetic-manual-example",
-        datetime(2026, 9, 25, 9, tzinfo=timezone.utc)),))
+        datetime(2026, 9, 25, 9, tzinfo=timezone.utc), "FREE_CASH"),))
     actual = calculate_month(replace(late, goals=(paid,))).goals[0]
     assert (actual.contribution_dates, actual.required_monthly,
             actual.contribution_status) == (2, D("450"), "PARTIAL")
     complete = replace(goal, saved_amount=D("800"), contributions=(GoalContribution(
         date(2026, 9, 5), D("800"), "synthetic-manual-example",
-        datetime(2026, 9, 25, 9, tzinfo=timezone.utc)),))
+        datetime(2026, 9, 25, 9, tzinfo=timezone.utc), "FREE_CASH"),))
     confirmed = calculate_month(replace(late, goals=(complete,))).goals[0]
     assert (confirmed.contribution_dates, confirmed.required_monthly,
             confirmed.contribution_status) == (2, D("200"), "OBSERVED")
@@ -359,10 +359,11 @@ def test_partial_goal_payment_does_not_count_again_as_future_proposal():
     paid = replace(base.goals[0], target_amount=D("1000"), saved_amount=D("200"),
                    contributions=(GoalContribution(date(2026, 9, 1), D("200"),
                                                    "synthetic-partial-payment",
-                                                   base.evaluated_at),))
+                                                   base.evaluated_at, "FREE_CASH"),))
     rules = tuple(replace(rule, amount=D("500")) if rule.category is C.GOAL else rule
                   for rule in base.policy.allocations)
     result = calculate_month(replace(base, goals=(paid,),
+                                     protected_contributions_in_balance=(),
                                      policy=replace(base.policy, allocations=rules)))
     assert (result.goals[0].required_monthly, result.goals[0].shortfall,
             result.goals[0].contribution_status) == (D("800"), D("500"), "PARTIAL")
@@ -418,10 +419,10 @@ def test_goal_reservation_and_observed_savings_are_each_protected_once():
     assert reserved.goals[0].end_of_day_funding_gap == D("0")
     paid = replace(base.goals[0], saved_amount=D("800"), contributions=(GoalContribution(
         date(2026, 9, 5), D("800"), "synthetic-goal-payment",
-        datetime(2026, 9, 25, 9, tzinfo=timezone.utc)),))
+        datetime(2026, 9, 25, 9, tzinfo=timezone.utc), "FREE_CASH"),))
     observed = calculate_month(replace(base, evaluated_at=datetime(2026, 9, 25, 9,
                                                                     tzinfo=timezone.utc),
-                                       existing_protected=D("800"), goals=(paid,),
+                                       existing_protected=D("0"), goals=(paid,),
                                        entries=(replace(base.entries[0], observed=True,
                                                         recorded_at=datetime(2026, 9, 25, 9,
                                                                              tzinfo=timezone.utc)),
@@ -438,7 +439,7 @@ def test_observed_goal_saving_does_not_rewrite_earlier_available_cash():
                    contributions=(GoalContribution(date(2026, 9, 20), D("800"),
                                                    "synthetic-goal-payment",
                                                    datetime(2026, 9, 25, 9,
-                                                            tzinfo=timezone.utc)),))
+                                                            tzinfo=timezone.utc), "FREE_CASH"),))
     data = replace(base, evaluated_at=datetime(2026, 9, 25, 9, tzinfo=timezone.utc),
                    cash_balance=D("2000"), goals=(paid,),
                    entries=(replace(base.entries[0], observed=True,
@@ -611,7 +612,8 @@ def test_goal_funding_check_separates_completed_partial_and_unconfirmed(
         observed, paid, target, expected_proposal):
     base = sample_input("overdue_salary")
     contribution = (GoalContribution(date(2026, 9, 5), D(paid),
-                                     "synthetic-goal-payment", base.evaluated_at),) if observed else ()
+                                     "synthetic-goal-payment", base.evaluated_at,
+                                     "FREE_CASH"),) if observed else ()
     goal = Goal("home", "HOME", D(target), date(2026, 10, 30), D(paid), 5, 1,
                 "synthetic-manual-example", contribution)
     data = replace(base, cash_balance=D("3000"), entries=(), goals=(goal,),
@@ -628,3 +630,132 @@ def test_goal_funding_check_separates_completed_partial_and_unconfirmed(
     if expected_proposal is None:
         assert any("goal home" in reason for reason in result.shortage_reasons)
         assert "goal_contribution_confirmation:home" in result.missing
+
+
+def protected_goal_case(*, balance_day=1, observed=False, included=None):
+    base = sample_input("overdue_salary")
+    contribution = (GoalContribution(date(2026, 9, 5), D("300"),
+                                     "synthetic-goal-payment", base.evaluated_at,
+                                     "FREE_CASH"),) if observed else ()
+    goal = Goal("home", "HOME", D("300"), date(2026, 9, 30),
+                D("300") if observed else D("0"), 5, 1,
+                "synthetic-manual-example", contribution)
+    return replace(base, evaluated_at=(base.evaluated_at if observed else
+                   datetime(2026, 9, 1, 0, tzinfo=timezone.utc)),
+                   balance_date=date(2026, 9, balance_day),
+                   cash_balance=D("1000"), existing_protected=D("800") if balance_day == 25
+                   else D("500"), entries=(), goals=(goal,),
+                   policy=replace(focused_policy({C.US_INVEST: "500"},
+                                                  goal_rules=(Allocation(C.GOAL, D("300"), "home"),)),
+                                  protected_floor=D("500")),
+                   protected_contributions_in_balance=included)
+
+
+def test_new_goal_saving_replaces_plan_without_releasing_prior_protection():
+    planned = calculate_month(protected_goal_case())
+    observed = calculate_month(protected_goal_case(observed=True))
+    assert (planned.allocation_margin, planned.shortage, planned.investment_proposal) == (
+        D("-300"), D("300"), None)
+    assert (observed.allocation_margin, observed.shortage, observed.investment_proposal) == (
+        D("-300"), D("300"), None)
+    assert day(observed, 25).ending_cash == D("1000")
+    assert day(observed, 25).available_cash == D("200")
+    assert observed.goals[0].funding_check_status == "NOT_REQUIRED"
+
+
+def test_midmonth_protected_snapshot_includes_prior_goal_once():
+    mid = calculate_month(protected_goal_case(balance_day=25, observed=True,
+                              included=(("home", date(2026, 9, 5)),)))
+    start = calculate_month(protected_goal_case(observed=True))
+    assert (mid.current_cash, mid.allocation_margin, mid.shortage,
+            mid.investment_proposal, day(mid, 25).available_cash) == (
+                start.current_cash, start.allocation_margin, start.shortage,
+                start.investment_proposal, day(start, 25).available_cash)
+
+
+def test_two_new_goal_contributions_each_protect_once():
+    base = protected_goal_case(observed=True)
+    second = Goal("retirement", "RETIREMENT", D("200"), date(2026, 9, 30),
+                  D("200"), 7, 2, "synthetic-manual-example",
+                  (GoalContribution(date(2026, 9, 7), D("200"),
+                                    "synthetic-goal-payment", base.evaluated_at, "FREE_CASH"),))
+    data = replace(base, goals=base.goals + (second,),
+                   policy=replace(base.policy, allocations=base.policy.allocations +
+                                  (Allocation(C.GOAL, D("200"), "retirement"),)))
+    result = calculate_month(data)
+    assert (result.allocation_margin, result.shortage, result.investment_proposal) == (
+        D("-500"), D("500"), None)
+    assert (day(result, 4).available_cash, day(result, 5).available_cash,
+            day(result, 7).available_cash) == (D("500"), D("200"), D("0"))
+    mid = calculate_month(replace(data, balance_date=date(2026, 9, 25),
+                                  existing_protected=D("1000"),
+                                  protected_contributions_in_balance=(
+                                      ("home", date(2026, 9, 5)),
+                                      ("retirement", date(2026, 9, 7)))))
+    assert (mid.allocation_margin, mid.shortage,
+            day(mid, 25).available_cash) == (D("-500"), D("500"), D("0"))
+
+
+def test_future_goal_check_uses_prior_protection_and_new_savings_together():
+    base = protected_goal_case(observed=True)
+    second = Goal("retirement", "RETIREMENT", D("300"), date(2026, 9, 30),
+                  D("0"), 27, 2, "synthetic-manual-example")
+    data = replace(base, goals=base.goals + (second,),
+                   policy=replace(base.policy, allocations=base.policy.allocations +
+                                  (Allocation(C.GOAL, D("300"), "retirement"),)))
+    result = calculate_month(data)
+    retirement = next(goal for goal in result.goals if goal.goal_id == "retirement")
+    assert retirement.funding_check_status == "CHECKED"
+    assert retirement.end_of_day_funding_gap == D("100")
+    assert day(result, 27).available_cash == D("-100")
+    assert result.investment_proposal is None
+
+
+def test_same_day_balance_requires_explicit_goal_inclusion():
+    base = protected_goal_case(balance_day=1, observed=True)
+    same_day = replace(base.goals[0], contribution_day=1,
+                       contributions=(replace(base.goals[0].contributions[0],
+                                              day=date(2026, 9, 1)),))
+    data = replace(base, balance_date=date(2026, 9, 1), goals=(same_day,))
+    with pytest.raises(ValueError, match="protected contribution inclusion"):
+        calculate_month(data)
+    excluded = calculate_month(replace(data, protected_contributions_in_balance=()))
+    included = calculate_month(replace(data, existing_protected=D("800"),
+                                       protected_contributions_in_balance=(("home", date(2026, 9, 1)),)))
+    assert excluded.allocation_margin == included.allocation_margin == D("-300")
+
+
+def test_protected_snapshot_rejects_missing_duplicate_or_future_inclusion():
+    data = protected_goal_case(balance_day=25, observed=True)
+    with pytest.raises(ValueError, match="protected contribution inclusion"):
+        calculate_month(data)
+    with pytest.raises(ValueError, match="protected contribution inclusion"):
+        calculate_month(replace(data, protected_contributions_in_balance=()))
+    key = ("home", date(2026, 9, 5))
+    with pytest.raises(ValueError, match="protected contribution inclusion"):
+        calculate_month(replace(data, protected_contributions_in_balance=(key, key)))
+    with pytest.raises(ValueError, match="protected contribution inclusion"):
+        calculate_month(replace(data, protected_contributions_in_balance=(("home", date(2026, 9, 28)),)))
+    with pytest.raises(ValueError, match="exceeds protected balance"):
+        calculate_month(replace(data, existing_protected=D("200"),
+                                protected_contributions_in_balance=(key,)))
+
+
+def test_goal_contribution_cannot_relabel_already_protected_cash():
+    data = protected_goal_case(observed=True)
+    changed = replace(data.goals[0], contributions=(
+        replace(data.goals[0].contributions[0], protection_source="PROTECTED_REALLOCATION"),))
+    with pytest.raises(ValueError, match="reallocation is unsupported"):
+        calculate_month(replace(data, goals=(changed,)))
+    missing = replace(data.goals[0], contributions=(
+        replace(data.goals[0].contributions[0], protection_source=None),))
+    with pytest.raises(ValueError, match="protection_source must be FREE_CASH"):
+        calculate_month(replace(data, goals=(missing,)))
+
+
+def test_protected_floor_is_a_minimum_for_same_total_not_an_extra_reserve():
+    data = protected_goal_case(observed=True)
+    result = calculate_month(replace(data, existing_protected=D("100"),
+                                     policy=replace(data.policy, protected_floor=D("500"))))
+    assert day(result, 25).available_cash == D("500")
+    assert result.allocation_margin == D("0")

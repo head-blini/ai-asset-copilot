@@ -96,6 +96,7 @@ class GoalContribution:
     amount: Decimal
     source: str
     recorded_at: datetime
+    protection_source: str | None = None  # Must identify new protection from free cash.
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +120,7 @@ class BudgetInput:
     evaluated_at: datetime
     balance_date: date  # Balance immediately before this date's entries.
     cash_balance: Decimal
-    existing_protected: Decimal
+    existing_protected: Decimal  # Protected total in the balance_date cash snapshot.
     balance_source: str
     entries: tuple[CashEntry, ...]
     goals: tuple[Goal, ...]
@@ -127,6 +128,8 @@ class BudgetInput:
     income_complete: bool
     obligations_complete: bool
     currency: str = "KRW"
+    protected_contributions_in_balance: tuple[tuple[str, date], ...] | None = None
+    # (goal_id, contribution day) included in existing_protected; explicit for same-day entries.
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +231,18 @@ def _released_reservations(entries: tuple[CashEntry, ...], through: date) -> Dec
     return released
 
 
+def _protected_total(data: BudgetInput, through: date,
+                     included: set[tuple[str, date]]) -> Decimal:
+    newly_protected = ZERO
+    for goal in data.goals:
+        for contribution in goal.contributions:
+            if contribution.day <= through and (goal.id, contribution.day) not in included:
+                newly_protected = _add(newly_protected, contribution.amount)
+    floor = data.policy.protected_floor if data.policy and \
+        data.policy.protected_floor is not None else ZERO
+    return max(_add(data.existing_protected, newly_protected), floor)
+
+
 def _validate(data: BudgetInput) -> None:
     if not isinstance(data, BudgetInput):
         raise TypeError("data must be BudgetInput")
@@ -324,6 +339,7 @@ def _validate(data: BudgetInput) -> None:
                 raise ValueError("card payment must match one unpaid current charge")
             paid_charges.add(payment.link_id)
     goal_ids: set[str] = set()
+    contribution_amounts: dict[tuple[str, date], Decimal] = {}
     for goal in data.goals:
         if not isinstance(goal, Goal) or not isinstance(goal.id, str) or not goal.id.strip() \
                 or goal.id in goal_ids or not isinstance(goal.kind, str) or not goal.kind.strip() \
@@ -354,10 +370,33 @@ def _validate(data: BudgetInput) -> None:
             if contribution.recorded_at > data.evaluated_at \
                     or contribution.recorded_at.astimezone(KST).date() < contribution.day:
                 raise ValueError("goal contribution cannot be recorded outside observation time")
+            if contribution.protection_source != "FREE_CASH":
+                raise ValueError("goal contribution protection_source must be FREE_CASH; "
+                                 "existing protection reallocation is unsupported")
             paid = _add(paid, contribution.amount)
             seen_days.add(contribution.day)
+            contribution_amounts[(goal.id, contribution.day)] = contribution.amount
         if paid > goal.saved_amount:
             raise ValueError("goal contributions exceed saved_amount")
+    eligible = {key for key in contribution_amounts if key[1] <= data.balance_date}
+    declared = data.protected_contributions_in_balance
+    if declared is None:
+        if eligible:
+            raise ValueError("protected contribution inclusion must be explicit at balance_date")
+    elif not isinstance(declared, tuple) or any(
+            not isinstance(key, tuple) or len(key) != 2 or
+            not isinstance(key[0], str) or type(key[1]) is not date for key in declared):
+        raise ValueError("protected contribution inclusion must be tuple goal/date keys")
+    else:
+        included = set(declared)
+        if len(included) != len(declared) or not included <= eligible or \
+                any(key not in included for key in eligible if key[1] < data.balance_date):
+            raise ValueError("protected contribution inclusion is incomplete or invalid")
+        included_amount = ZERO
+        for key in included:
+            included_amount = _add(included_amount, contribution_amounts[key])
+        if included_amount > data.existing_protected:
+            raise ValueError("protected contribution inclusion exceeds protected balance")
     if data.policy is not None:
         if not isinstance(data.policy, BudgetPolicy) or not isinstance(data.policy.allocations, tuple):
             raise ValueError("policy must contain tuple allocations")
@@ -425,6 +464,7 @@ def _goal_result(goal: Goal, data: BudgetInput, proposed: Decimal | None) -> Goa
 def calculate_month(data: BudgetInput) -> BudgetResult:
     """Return a proposal, never an approval, transfer, FX conversion or order."""
     _validate(data)
+    included_protection = set(data.protected_contributions_in_balance or ())
     evaluation_day = data.evaluated_at.astimezone(KST).date()
     entries = tuple(sorted(data.entries, key=lambda item: (item.day, item.id)))
     policy = data.policy
@@ -549,20 +589,16 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
 
     # This is a conservative end-of-day check, not proof of intraday transfer capacity.
     day_by_date = {item.day: item for item in days}
-    observed_goal_savings = ZERO
     reserved_goals = ZERO
     reserved_other = ZERO
     for rule in rules.values():
         if rule.category is not BudgetCategory.GOAL:
             reserved_other = _add(reserved_other, rule.reserved)
     for goal in data.goals:
-        for contribution in goal.contributions:
-            observed_goal_savings = _add(observed_goal_savings, contribution.amount)
         rule = rules.get((BudgetCategory.GOAL, goal.id))
         if rule is not None:
             reserved_goals = _add(reserved_goals, rule.reserved)
-    protected = max(data.existing_protected, policy.protected_floor if policy and
-                    policy.protected_floor is not None else ZERO, observed_goal_savings)
+    protected = _protected_total(data, evaluation_day, included_protection)
     goal_locks: dict[date, Decimal] = {}
     checked_goals: dict[str, GoalResult] = {}
     ordered_goals = sorted(zip(sorted(data.goals, key=lambda item: (item.priority, item.id)),
@@ -591,8 +627,9 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                     earlier_locks = _add(earlier_locks, amount)
             remaining_other = _sub(reserved_other,
                                    _released_reservations(entries, contribution_date))
+            due_protected = _protected_total(data, contribution_date, included_protection)
             available = _sub(_sub(_sub(_sub(day_by_date[contribution_date].ending_cash,
-                                           protected), reserved_goals), remaining_other),
+                                           due_protected), reserved_goals), remaining_other),
                              earlier_locks)
             gap = _positive_gap(new_lock, available)
             goal_locks[contribution_date] = _add(prior_same_day, new_lock)
@@ -609,13 +646,7 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
     if policy is not None and policy.protected_floor is not None and not critical_missing:
         available_days = []
         for day in days:
-            saved_through_day = ZERO
-            for goal in data.goals:
-                for contribution in goal.contributions:
-                    if contribution.day <= day.day:
-                        saved_through_day = _add(saved_through_day, contribution.amount)
-            day_protected = max(data.existing_protected, policy.protected_floor,
-                                saved_through_day)
+            day_protected = _protected_total(data, day.day, included_protection)
             remaining_other = (_sub(reserved_other,
                                     _released_reservations(entries, day.day))
                                if day.day >= evaluation_day else ZERO)
