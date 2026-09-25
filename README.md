@@ -17,6 +17,16 @@ python -m pytest
 
 단위 테스트에는 환경 변수가 필요 없다. 실제 Twelve Data adapter를 사용할 때만 `TWELVE_DATA_API_KEY`가 필요하다. `.env` 자동 로더는 없다. 기본 정책과 한국 Paper Trading 자금은 `config/`에 선언되어 있고 `main`의 실행 코드에서는 아직 읽지 않는다. 실제 계좌 자료나 API 키를 저장소에 넣지 않는다.
 
+## BUD-01 오프라인 예산 후보
+
+이 브랜치의 수동 가상 KRW 입력·순수 계산기·보고는 다음 한 명령으로 확인한다.
+
+```bash
+.venv/bin/python examples/budget_monthly_offline.py --scenario all
+```
+
+`normal`, `cash_gap`, `unknown_goal`을 각각 `--scenario`에 넣어 따로 실행할 수 있다. 입력은 [예제 파일](examples/budget_monthly_offline.py)의 `sample_input()`에서 수정한다. 보고의 월간 여유액은 명시된 가상 정책의 배정 차이이며 투자 가능액 승인이나 장중 잔고 보장이 아니다. 목표 필요 적립액의 두 자리 표시는 읽기 위한 반올림이며 API의 `Decimal` 결과는 반올림하지 않는다. 은행·카드·Toss, DB 저장, AI, 웹, 송금·주문 연결은 없다. 이 후보는 main 기능이 아니다.
+
 ## 문서
 
 - [AGENTS.md](AGENTS.md): 작업·검증·Phase 완료 규칙

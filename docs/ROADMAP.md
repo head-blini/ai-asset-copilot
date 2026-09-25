@@ -82,6 +82,8 @@ Phase 12에 Broker credentials나 adapter가 존재해도 실주문 권한을 �
 
 정책 값과 입력·승인·연결의 남은 결정은 [OD-15~17](../PROJECT_SPEC.md#15-open-decisions)에 둔다. Toss 증권 API가 급여·은행·카드 내역을 제공한다고 가정하지 않는다. Toss 조회 capability 조사는 OD-14의 독립 작업이며 이 예산 범위의 외부 연동 승인이나 실계좌 호출이 아니다. BUD-01 이후는 각 단계마다 작은 코드·테스트·보고 단위로 진행한다.
 
+BUD-01의 순수 계산·가상 입력·세 시나리오 보고는 별도 `feat/budget-monthly-foundation` 후보에서 검토 중이다. 결과는 승인·이체·주문이나 BUD-02/03 구현이 아니다. 이 후보의 테스트·CI·리뷰·병합 상태는 [STATUS](STATUS.md)에서 추적하고, 기존 완료 조건은 유지한다.
+
 ## Phase 1 권장 구현 범위
 
 Phase 1 구현 기준과 완료 검증 범위의 기록이다. OD-01과 OD-06 중 Foundation에 필요한 결정을 해결했다.
