@@ -57,9 +57,9 @@ Phase 1 구현 기준과 완료 검증 범위의 기록이다. OD-01과 OD-06 �
 
 ## 모델과 검수
 
-일반 구현은 Sol Medium, 복잡한 구현은 Sol High를 사용한다. Architecture·금융 구조는 Astra Medium 또는 High로 검토한다. Phase 0은 Astra High로 진행한다.
+작업 시작 시 [OpenAI 공식 모델 문서](https://developers.openai.com/api/docs/models)와 [Codex 코드 생성 안내](https://developers.openai.com/api/docs/guides/code-generation)에서 실행 시점의 최신 Codex 가용 모델을 확인한다. 모델명은 향후 낡을 수 있다. 비용·속도보다 작업 위험도와 복잡도를 우선한다. 복잡한 구현의 기본은 GPT-6 Sol / High, 중요한 Architecture·금융 구조 검토는 GPT-6 Sol / XHigh다. 반복적이고 범위가 좁은 작업에는 필요 시 GPT-6 Luna를 사용할 수 있다.
 
-Backtest Integrity Audit, Broker / Execution Safety Audit, 실제 자금 연결 전 최종 Safety Audit에는 Astra Extra High를 사용한다. 모델 사용 원칙의 원장은 PROJECT_SPEC이며, Audit만으로 인간의 자금 투입 승인을 대체하지 않는다.
+Backtest Integrity Audit, Broker / Execution Safety Audit, 실제 자금 연결 전 최종 Safety Audit에는 GPT-6 Sol / XHigh 또는 Max를 사용한다. AI끼리의 합의는 검증 증거가 아니며 테스트·CI·실행 결과가 우선이다. 모델 사용 원칙의 원장은 PROJECT_SPEC이며, Audit만으로 인간의 자금 투입 승인을 대체하지 않는다.
 
 제공자, 금융 계산 규칙, 정책 운영 방식, 한국 거래 비용·위험 한도, 실전 승격 기준 등의 미결정 사항은 [Open Decisions](../PROJECT_SPEC.md#15-open-decisions)에서 추적한다.
 

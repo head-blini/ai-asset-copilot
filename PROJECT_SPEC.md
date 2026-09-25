@@ -182,16 +182,18 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 
 ## 13. 개발 모델 운용
 
+작업 시작 시 [OpenAI 공식 모델 문서](https://developers.openai.com/api/docs/models)와 [Codex 코드 생성 안내](https://developers.openai.com/api/docs/guides/code-generation)에서 실행 시점의 최신 Codex 가용 모델을 확인한다. 아래 모델명은 현재 기준이며 향후 낡을 수 있다. 실제 선택은 비용·속도보다 작업의 위험도와 복잡도를 우선한다.
+
 | 업무 | 사용 원칙 |
 | --- | --- |
-| 일반 구현 | Sol Medium |
-| 복잡한 구현 | Sol High |
-| 중요한 Architecture / 금융 구조 검토 | Astra Medium 또는 High |
-| Backtest Integrity Audit | Astra Extra High |
-| Broker / Execution Safety Audit | Astra Extra High |
-| 실제 자금 연결 전 최종 Safety Audit | Astra Extra High |
+| 복잡한 구현 기본 | GPT-6 Sol / High |
+| 중요한 Architecture / 금융 구조 검토 | GPT-6 Sol / XHigh |
+| Backtest Integrity Audit | GPT-6 Sol / XHigh 또는 Max |
+| Broker / Execution Safety Audit | GPT-6 Sol / XHigh 또는 Max |
+| 실제 자금 연결 전 최종 Safety Audit | GPT-6 Sol / XHigh 또는 Max |
+| 반복적이고 범위가 좁은 작업 | 필요 시 GPT-6 Luna 사용 가능 |
 
-대부분의 실제 구현은 Sol이 담당하고 Astra는 설계와 중요 검수에 집중한다. 이번 Phase 0의 지정 모델은 Astra High다. 이 표는 개발 작업의 모델 운용 원칙이며, 제품에서 사용할 AI Provider·모델 선택은 별도 Open Decision이다.
+AI끼리의 합의는 검증 증거가 아니다. 테스트·CI·실행 결과를 우선한다. 이 표는 개발 작업의 모델 운용 원칙이며, 제품에서 사용할 AI Provider·모델 선택은 별도 Open Decision이다.
 
 ## 14. Phase 0 산출물과 제외 범위
 
