@@ -27,6 +27,7 @@ flowchart LR
 | `domain` | 공통 식별자·금융 개념·불변식·provider/repository 계약 | 외부 SDK와 저장소 구현에 독립 |
 | `portfolio` | 투자 계좌·포지션·Transaction Ledger·현금과 평가·손익 계산 | 계산 결과의 근거와 시점 보존 |
 | `budget` | 개인 재무 기록·예정 현금흐름·월 예산의 순수 계산 | 투자 Transaction Ledger와 별도 기록; BUD-01은 AI·DB·Broker 독립 |
+| 후보 `web` | 루프백 HTML 입력·검증·표시 adapter | `BudgetInput` 생성 후 기존 `calculate_month()` 호출; 재무 자료 저장 없음 |
 | `application` | Repository·Market Provider를 조합한 현재 미국 계좌 분석 | 관측 시점·통화·신선도 확인 후 순수 계산 호출 |
 | `market` | 가격·FX·시장 상태의 조회 계약과 정규화 | 외부 API adapter와 순수 데이터 검증 분리 |
 | `research` | Research 자료, Investment Thesis, Decision Journal | 당시 근거와 사후 결과를 구분 |
@@ -39,6 +40,10 @@ flowchart LR
 | `reports` | 검증된 데이터와 AI 설명의 보고서 구성 | 수치를 독자적으로 재계산하지 않음 |
 
 논리적 모듈 하나에 Domain 로직과 adapter가 모두 생기면 파일 수준으로 먼저 분리한다. 필요가 확인되기 전에 다층 패키지나 프레임워크를 추가하지 않는다. Backtest와 Shadow Engine의 구체적 패키지 배치는 각각 Phase 9와 Phase 5에서 결정한다.
+
+WEB-01 후보의 흐름은 **브라우저 폼 → bounded URL-encoded 입력 검증 → `BudgetInput` → `budget.monthly.calculate_month()` → HTML 표시**다. 웹 전용 선택 설치 extra에 FastAPI/Jinja2/Uvicorn을 두고 `budget`·`portfolio`·`domain`에서는 이를 import하지 않는다. 금액은 문자열에서 직접 `Decimal`로 변환하고 결과의 Decimal 원값을 화면에 표시한다. 가상 예제 데이터 생성은 CLI와 웹에서 공유한다. 템플릿·정적 파일은 wheel에 포함하며 저장소 현재 디렉터리에 의존하지 않는다.
+
+기본 서버는 `127.0.0.1`에만 바인딩한다. Host·Origin·CSRF와 입력 크기를 검사하고, HTML/오류 응답은 no-store다. 개인 입력·결과를 URL, 쿠키, 로그, localStorage, 파일·DB에 저장하지 않는다. 쿠키에는 CSRF 토큰만 둔다. 이 경계는 로컬 미리보기의 제한이며 인증·원격접속·운영 보안 완료가 아니다. 모바일 폭은 배치 검증만 뜻한다. 이 화면은 실제 계좌 입력·대사나 M1 미국 자산 보고, Phase 11 전체 보고 화면을 구현하지 않는다.
 
 ### 개인 재무와 투자 원장의 경계 — 향후 설계
 

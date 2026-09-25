@@ -25,7 +25,22 @@ main의 수동 가상 KRW 입력·순수 계산기·보고는 다음 한 명령�
 .venv/bin/python examples/budget_monthly_offline.py --scenario all
 ```
 
-`normal`, `cash_gap`, `unknown_goal`, `overspend`, `extra_reservation`, `overdue_salary`, `goal_conflict`을 각각 `--scenario`에 넣어 따로 실행할 수 있다. 입력은 [예제 파일](examples/budget_monthly_offline.py)의 `sample_input()`에서 수정한다. 보고는 월초 원안, 확인된 현금 기준의 현재 여유·부족, 미래 예정 입금을 포함한 예상 여유, 목표 배정 후 날짜별 가용현금을 구분한다. 이 값과 신규 투자 제안은 승인이나 장중 잔고 보장이 아니다. 목표 필요 적립액의 두 자리 표시는 읽기 위한 반올림이며 API의 `Decimal` 결과는 반올림하지 않는다. 은행·카드·Toss, DB 저장, AI, 웹, 송금·주문 연결은 없다. 이 오프라인 계산기는 main 기능이다. 실제 계좌·운영 경로는 별도 검증이 필요하다.
+`normal`, `cash_gap`, `unknown_goal`, `overspend`, `extra_reservation`, `overdue_salary`, `goal_conflict`을 각각 `--scenario`에 넣어 따로 실행할 수 있다. 예제 자료는 [공유 생성 함수](src/asset_copilot/budget/examples.py)의 `sample_input()`을 CLI와 웹이 함께 사용한다. 보고는 월초 원안, 확인된 현금 기준의 현재 여유·부족, 미래 예정 입금을 포함한 예상 여유, 목표 배정 후 날짜별 가용현금을 구분한다. 이 값과 신규 투자 제안은 승인이나 장중 잔고 보장이 아니다. 목표 필요 적립액의 두 자리 표시는 읽기 위한 반올림이며 API의 `Decimal` 결과는 반올림하지 않는다. 은행·카드·Toss, DB 저장, AI, 송금·주문 연결은 없다. 이 오프라인 계산기는 main 기능이다. 실제 계좌·운영 경로는 별도 검증이 필요하다.
+
+## WEB-01 로컬 예산 미리보기 후보
+
+별도 웹 extra를 설치하면 Python 코드를 수정하지 않고 브라우저에서 직접 입력·수정·재계산할 수 있다. 기본 화면의 금융 값은 미설정이다. 예제는 선택할 때만 불러오며 모두 가상 자료다.
+
+```bash
+python -m pip install -e '.[web]'
+asset-copilot-budget-web
+# 브라우저에서 http://127.0.0.1:8765/ 접속
+# 종료: 실행 터미널에서 Ctrl+C
+```
+
+기본 바인딩은 `127.0.0.1:8765`다. 웹 없이 기존 BUD-01 계산기와 CLI를 쓸 수 있다. 화면과 결과는 **저장되지 않는 미리보기**이고 새로고침하면 직접 입력 화면으로 돌아간다. 이 후보는 인증·원격접속·휴대폰 접속·운영 복구를 제공하지 않는다. 모바일 폭 검증은 화면 배치 검증일 뿐 실제 휴대폰 원격접속 완료가 아니다. 송금·환전·주문이나 개인화 투자 추천도 제공하지 않는다.
+
+웹 회귀 테스트는 `python -m pip install -e '.[web-test]'` 후 `python -m pytest tests/test_budget_web.py`로 실행한다. 브라우저 검증은 `python -m playwright install chromium`으로 Chromium을 설치한 뒤 서버 실행 중 `python tests/browser_budget_web_smoke.py`로 수행한다. 이 검증은 PC/모바일 폭의 실제 브라우저 경로와 [데스크톱](docs/images/budget-web-desktop.png)·[모바일](docs/images/budget-web-mobile.png) 가상 화면 증거를 만든다.
 
 ## 문서
 

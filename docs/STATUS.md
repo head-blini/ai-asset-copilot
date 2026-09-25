@@ -1,12 +1,13 @@
 # Asset Copilot — Project Status
 
-Last verified: 2026-09-25 KST. Canonical repository: `head-blini/ai-asset-copilot`. PR #1 → #3 → #4 were reviewed, tested against their then-current main, and merged in that order. The status update itself is a separate documentation PR; its own checkout and CI are reported with that PR.
+Last verified: 2026-09-26 KST. Canonical repository: `head-blini/ai-asset-copilot`. WEB-01 is a separate local-web review candidate based on adopted main `926de34351282afed386a32de812fa1d27c27699`. PR #1 → #3 → #4 and adoption STATUS PR #5 are already merged; their evidence below remains historical.
 
 ## Ref and phase state
 
 | Ref / scope | Reviewed head and adopted merge | Current result |
 | --- | --- | --- |
-| `main` after PR #4 | `326b5da1ee28011478b6889c4ee89bdfe548d4fe` | Phase 0–3 and BUD-01 offline calculator on main; no Policy implementation or live funds connection |
+| `main` after PR #5 | `926de34351282afed386a32de812fa1d27c27699` | Phase 0–3 and BUD-01 offline calculator on main; no Policy implementation or live funds connection |
+| `feat/budget-local-web` | WEB-01 candidate branched from `926de34351282afed386a32de812fa1d27c27699`; exact final head and CI are reported in its PR | IN REVIEW, unmerged; local browser preview only |
 | PR #1 R0 | reviewed head `9cd1a0f52b457352fca7d76500daac57d9dbdd25`; merge `bbfcc91ad8bed8ff2ede740ecbef11fdc61bab06` | MERGED; documentation and pytest CI |
 | PR #3 Budget scope | reviewed head `d58a4d32d217998697ff7e3706ded1e8e91631c8`; integration head `275db6f28534f7b6b1dd87d039fa86ed0ee1d305`; merge `387da7b5616351dd32b58a5f95299ca57809bf7d` | MERGED; specification, architecture and roadmap scope only |
 | PR #4 BUD-01 | reviewed head `4b8b5202ac2933305aeabc2e91f56989719045aa`; integration head `752d487f17f086b4561a6c27ff1d71d7df5bb1a5`; merge `326b5da1ee28011478b6889c4ee89bdfe548d4fe` | MERGED; integration Git tree `dd3c846de1132eb7ad06b3200d7660d188a9dfc8` equals reviewed tree |
@@ -14,6 +15,14 @@ Last verified: 2026-09-25 KST. Canonical repository: `head-blini/ai-asset-copilo
 | Policy candidate | head `089ee027bbdb03557d83cb081e0acd35694c23fe` | Separate unmerged candidate |
 
 Phase 0–3: **DONE on main**. BUD-01: **DONE for its offline, manual-input calculation and report gate** after code review, 205 passing tests, seven offline examples, PR CI and main merge. BUD-02/03/04: **PLANNED / NOT IMPLEMENTED**. Phase 4: **IN REVIEW / NOT DONE**; P4-05 is separate, and P4-06/07/09 remain OPEN. Phase 5–13 remain PLANNED. This status grants no web deployment, real-account import or reconciliation, operational validation, reservation lifecycle, approval, transfer, FX conversion or order authority. User goal amounts, budget policy and risk limits remain undecided.
+
+## WEB-01 local preview candidate (2026-09-26)
+
+The new `web` adapter accepts bounded Korean HTML form input, converts strings directly to Decimal and the existing BUD-01 records, calls `calculate_month()` once, and renders the result. FastAPI/Jinja2/Uvicorn live in optional extras. The original `monthly.py` calculation and its 72 budget regression tests are unchanged. The CLI and web use the same seven synthetic example objects. The browser starts with no financial defaults; examples are loaded explicitly. Requests are loopback-only by default with Host, Origin, CSRF, no-store and size checks. There is no saved financial input, authentication, remote mobile access or operational deployment.
+
+At the clean baseline `926de34351282afed386a32de812fa1d27c27699`, a new worktree `.venv` on macOS Python 3.11.15 ran **205 passed** and `pip check` clean; import resolved to that worktree. After implementation, the local web-test `.venv` ran `python -m pytest`: **229 passed**, including **24 web tests**; `python -m pytest tests/test_budget_web.py`: **24 passed**; `python -m pip check`, `git diff --check`, and all seven CLI examples passed. A separate core-only `.venv` ran **205 passed, one expected optional-web module skip**; the dedicated web run above executed every web test rather than relying on that skip. An ordinary wheel installed outside the repository served the HTML, CSS, JavaScript and an example from its installed package path.
+
+Real Chromium smoke covered direct input → calculate → edit → previous result removal → recalculate, an error with preserved input, add/delete row controls, and explicit example loading with its original evaluation timestamp. Desktop 1440px and mobile 390px layouts had no document overflow. Synthetic [desktop](images/budget-web-desktop.png) and [mobile](images/budget-web-mobile.png) screenshots record the direct-input result. CI for this candidate is pending until its PR head is pushed; its actual checkout and result belong in the PR body. WEB-01 remains **IN REVIEW / NOT DONE on main**. BUD-01 remains DONE for its own offline gate.
 
 ## Adoption verification (2026-09-25)
 
