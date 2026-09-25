@@ -1,6 +1,6 @@
 """Deterministic, single-person KRW monthly budget and end-of-day cash forecast."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -123,6 +123,8 @@ class GoalResult:
     contribution_dates: int | None
     proposed_amount: Decimal | None
     shortfall: Decimal | None
+    contribution_date_this_month: date | None = None
+    end_of_day_funding_gap: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +401,28 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                             day_shortage, tuple(item.id for item in items)))
         current += timedelta(days=1)
 
+    # This is a conservative end-of-day check, not proof of intraday transfer capacity.
+    day_by_date = {item.day: item for item in days}
+    reserved_for_prior_goals = ZERO
+    checked_goals: list[GoalResult] = []
+    for goal, result in zip(sorted(data.goals, key=lambda item: (item.priority, item.id)), goal_results):
+        contribution_date = date(data.month.year, data.month.month, goal.contribution_day)
+        if contribution_date < data.balance_date:
+            checked_goals.append(result)
+            continue
+        gap = None
+        if result.proposed_amount is not None and policy is not None \
+                and policy.protected_floor is not None and data.income_complete \
+                and data.obligations_complete:
+            protected = max(data.existing_protected, policy.protected_floor)
+            available = _sub(_sub(day_by_date[contribution_date].ending_cash, protected),
+                             reserved_for_prior_goals)
+            gap = max(_sub(result.proposed_amount, available), ZERO)
+            reserved_for_prior_goals = _add(reserved_for_prior_goals, result.proposed_amount)
+        checked_goals.append(replace(result, contribution_date_this_month=contribution_date,
+                                     end_of_day_funding_gap=gap))
+    goal_results = tuple(checked_goals)
+
     margin = unallocated = shortage = investment = None
     if not missing:
         confirmed_income = ZERO
@@ -420,7 +444,8 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                            remaining_plan), prior_card_due)
         unallocated, shortage = max(margin, ZERO), max(-margin, ZERO)
         if margin >= ZERO and all(item.shortage == ZERO for item in days) \
-                and all(item.shortfall == ZERO for item in goal_results):
+                and all(item.shortfall == ZERO and item.end_of_day_funding_gap == ZERO
+                        for item in goal_results):
             investment = _add(rules[(BudgetCategory.US_INVEST, None)].amount,
                               rules[(BudgetCategory.KR_STRATEGY, None)].amount)
     sources = tuple(sorted({data.balance_source, *(item.source for item in entries),
@@ -436,6 +461,9 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
     for goal in goal_results:
         if goal.shortfall is not None and goal.shortfall > ZERO:
             reasons.append(f"goal {goal.goal_id} monthly contribution below required by {goal.shortfall}")
+        if goal.end_of_day_funding_gap is not None and goal.end_of_day_funding_gap > ZERO:
+            reasons.append(f"goal {goal.goal_id} lacks {goal.end_of_day_funding_gap} "
+                           f"at {goal.contribution_date_this_month} end of day")
     previous_shortage = ZERO
     for item in days:
         if item.shortage is not None and item.shortage > ZERO and previous_shortage == ZERO:

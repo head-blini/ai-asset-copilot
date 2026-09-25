@@ -76,12 +76,18 @@ def render(scenario: str) -> str:
     result = calculate_month(sample_input(scenario))
     lines = [f"[{scenario}] 2026-09 KRW budget proposal (not approval, transfer or order)",
              f"  evaluated_at={result.evaluated_at.isoformat()} balance_date={result.balance_date}",
-             f"  allocation margin={result.allocation_margin} unallocated={result.unallocated} shortage={result.shortage}"]
+             f"  allocation margin={result.allocation_margin} unallocated={result.unallocated} shortage={result.shortage}",
+             "  goal monthly amounts below are rounded to 0.01 KRW for display; API Decimal is unrounded"]
     for item in result.allocations:
         label = item.category.value + (f":{item.goal_id}" if item.goal_id else "")
         lines.append(f"  {label}: planned={item.planned} used={item.used} reserved={item.reserved} remaining={item.remaining}")
     for goal in result.goals:
-        lines.append(f"  goal {goal.kind}: required_monthly={goal.required_monthly} shortfall={goal.shortfall} missing={','.join(goal.missing) or '-'}")
+        required = f"{goal.required_monthly:.2f}" if goal.required_monthly is not None else "None"
+        shortfall = f"{goal.shortfall:.2f}" if goal.shortfall is not None else "None"
+        lines.append(f"  goal {goal.kind}: required_monthly={required} shortfall={shortfall} "
+                     f"payment_day={goal.contribution_date_this_month} "
+                     f"end_of_day_funding_gap={goal.end_of_day_funding_gap} "
+                     f"missing={','.join(goal.missing) or '-'}")
     for day in result.cash_days:
         if day.entry_ids or day.shortage:
             lines.append(f"  {day.day}: actual_income={day.actual_income} planned_income={day.planned_income} "

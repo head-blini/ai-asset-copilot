@@ -42,6 +42,8 @@ def test_normal_month_preserves_categories_cash_and_provenance():
     assert result.sources == ("synthetic-manual-example",)
     assert "intraday order is unknown" in result.assumptions[0]
     assert all(item.required_monthly is not None for item in result.goals)
+    assert all(item.contribution_date_this_month == date(2026, 9, 28)
+               and item.end_of_day_funding_gap == D("0") for item in result.goals)
     assert result.investment_proposal == D("500")
     assert result.cash_days[-1].ending_cash == D("1000") + D("2500") + D("500") - D("1820")
 
@@ -82,6 +84,17 @@ def test_goal_deadline_shortfall_is_visible_and_blocks_investment_proposal():
     assert first.shortfall > D("0")
     assert result.investment_proposal is None
     assert any("goal home" in reason for reason in result.shortage_reasons)
+
+
+def test_goal_priority_prevents_same_cash_from_funding_two_payment_days():
+    base = sample_input()
+    rules = tuple(replace(item, amount=D("1500") if item.goal_id == "home" else D("1000"))
+                  if item.category is C.GOAL else item for item in base.policy.allocations)
+    result = calculate_month(replace(base, policy=replace(base.policy, allocations=rules)))
+    home, retirement = result.goals
+    assert home.end_of_day_funding_gap == D("0")
+    assert retirement.end_of_day_funding_gap == D("520")
+    assert result.investment_proposal is None
 
 
 def test_zero_income_is_known_deficit_while_missing_income_is_unknown():
