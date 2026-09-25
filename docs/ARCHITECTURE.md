@@ -1,6 +1,6 @@
 # Architecture
 
-이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. 명세가 authoritative source다. **현재 구현은 Portfolio Foundation, Market Data 정규화, 현재 미국 계좌 분석이다. AI·Risk·Execution·Broker 등의 흐름은 향후 설계다.** 정책 설정 파일도 아직 실행 코드에서 읽지 않는다.
+이 문서는 [PROJECT_SPEC.md](../PROJECT_SPEC.md)의 요구사항을 설계로 설명한다. **main의 현재 구현은 Portfolio Foundation, Market Data 정규화, 현재 미국 계좌 분석이다.** `feat/phase-4-policy-engine`의 Policy evaluator는 미병합 후보이며 현재 main의 기능이 아니다. AI·Risk·Execution·Broker·보고·운영 흐름은 향후 설계다. main의 정책 설정 파일은 아직 실행 코드에서 읽지 않는다.
 
 ## 1. 공통 Domain과 의존성
 
@@ -55,6 +55,14 @@ Portfolio `value_at_prices()`는 여전히 순수 함수다. Phase 3 orchestrati
 
 `trading_pnl`은 매매 실현손익과 열린 Position의 미실현손익의 합이다. DIVIDEND는 현금을 늘리지만 이 거래 손익에는 포함되지 않는다. 따라서 이 값은 총 투자수익률이 아니다. 과거 가격·snapshot history가 없어 CAGR·Max Drawdown·Volatility·Sharpe·Benchmark 성과를 만들지 않는다. 휴장일·주말을 고려한 freshness, 배당 포함 성과와 현금흐름 조정 방식은 OD-03/OD-04의 후속 결정이다. 실제 개인 거래 및 SQLite DB는 Git에서 제외한다.
 
+### 사용자 입력에서 보고까지의 연결 상태
+
+`TransactionRepository.append`와 `SQLiteStore`는 Ledger에 검증된 거래를 저장한다. `TwelveDataMarketDataProvider`는 명시적 asset_id mapping으로 가격·FX를 가져오고 `USPortfolioAnalyzer.analyze`는 시점·출처·신선도를 확인해 불변 분석을 만든다. 이들은 현재 **Python API**다. 실제 증권계좌 자료를 입력·정정·중복 제거·대사하는 사용자 경로, 수동 입력 검증 UI/CLI, 지속 실행기, 사용자 보고서가 main에 없다. 테스트 fixture를 실제 자료 반입 수단으로 간주하지 않는다.
+
+M1 연결 설계는 `실제 거래/계좌 자료 → 입력 검증·중복/정정·대사 → Ledger append 및 재생 → 가격/FX 관측 검증 → 현재 평가 → 인간 Policy 평가 → 출처·시각·누락·UNKNOWN을 표시한 최소 보고` 순서다. Policy 단계는 Phase 4 완료 gate와 승인된 버전/적용시각을 요구한다. 검증 불가 자료나 stale quote를 임의 값으로 채우지 않는다. 보고 전달 방식·입력 방식·시세 권리와 freshness는 OD-13/OD-04에서 정하고, Phase 11의 전체 Dashboard·Daily/Weekly Report 범위는 유지한다. 운영에는 실패 알림, 재시작, 대사, 접근 권한 및 백업/복구 검증이 필요하다.
+
+후보의 `application/policy_config.py`, `application/us_portfolio_policy.py`, `domain/policy.py`는 불변 분석과 설정을 평가하는 제안 코드다. Core/Growth 분류와 전체 Target/Range, 정책 변경 이력·적용시각·인간 승인 경계가 OPEN이므로 사용자에게 완전한 정책 적합 판정으로 전달할 수 없다. 후보를 main에 가져오기 전에는 이 파일을 main의 실행 경로로 문서화하지 않는다.
+
 ### Phase 3 감사에서 명확히 한 계약
 
 `evaluated_at`은 현재 호출의 Ledger cutoff와 freshness 기준이다. `as_of`는 그 시각 및 `fetched_at`보다 늦을 수 없지만, 실제 취득은 호출 시작 후 완료되므로 `fetched_at > evaluated_at`은 허용한다. 모든 비교는 UTC이며 Provider clock의 정확성은 adapter 책임이다. 이 API는 과거 시점에 무엇을 알 수 있었는지 재현하는 API가 아니다. 역사적 분석에는 관측의 가용 시각·수정 이력과 당시 Ledger를 별도로 정의해야 한다.
@@ -87,6 +95,8 @@ flowchart TD
 
 각 포트폴리오는 독립 상태를 갖는다. 다이어그램의 Snapshot은 공통 입력 형태를 뜻하며 동일 잔고를 공유한다는 뜻이 아니다. 초기 상태·입출금 대응 방식은 OD-03에서 정한다. `US_REAL`은 사용자의 외부 거래를 반영하고 시스템이 실제 주문을 자동 발행하지 않는다.
 
+이 다이어그램의 Shadow·AI·Benchmark·Journal·성과 비교 노드는 향후 설계다. main에는 REAL의 현재 계좌 분석까지만 있다. 후보의 Policy evaluator도 Shadow 체결이나 사용자 보고 기능을 제공하지 않는다.
+
 `US_SHADOW_POLICY`는 인간의 장기 Policy와 코드로 정한 리밸런싱 규칙을 따른다. `US_SHADOW_AI`는 당시 AI 제안과 Policy/Risk 검증 결과를 연결한다. 제안 시점 이후의 체결 가능 정보와 비용을 사용해 가상 실행하며, 미래 정보로 과거 제안을 개선하지 않는다. 두 Shadow는 실제 Broker 주문으로 라우팅할 수 없어야 한다.
 
 성과 비교는 Total Return, Max Drawdown, Volatility, Sharpe Ratio, Cash Ratio, Concentration, Sector Exposure를 포함한다. 계산식·가격/FX 시점·통화·비용·배당·현금흐름 규칙은 동일한 비교 기준으로 명시하며, 아직 미정인 방식은 OD-03에서 해결한다.
@@ -110,6 +120,8 @@ flowchart LR
     ADAPTER --> PAPER[PaperBroker / 가상 체결]
     ADAPTER -. Phase 13 승인 후 .-> LIVE[KoreanBroker / 제한적 실전]
 ```
+
+이 한국 주문 다이어그램은 Phase 8–13의 설계다. 현재 main과 Policy 후보에는 Strategy/Risk/Execution/Broker 런타임 경로가 없다. Phase 8 Paper 기반과 Phase 9 Backtest 후 Phase 10 실시간 가상 운영을 검증하고, Phase 12 adapter·독립 Risk gate 및 Phase 13 인간 승인 전에는 실주문을 활성화하지 않는다. Broker 후보(Toss 포함)의 API capability와 운영 가능 시간은 OD-14에서 실제 문서·환경으로 확인한다.
 
 Strategy는 주문 의도만 만든다. Risk는 계좌 상태와 설정에 따라 코드로 제한을 평가하고, 거절 사유와 평가 입력을 남긴다. Execution은 Risk 승인과 실행 모드·계좌가 일치하는지 확인하고 주문을 Broker Adapter에 전달한다. Strategy·AI가 Execution 또는 Broker에 직접 접근해 검증을 생략할 수 없는 의존성 구조를 유지한다.
 
@@ -135,39 +147,7 @@ Backtest는 당시 존재하고 사용 가능했던 종목·정보를 사용한�
 
 ## 8. 현재 구조와 후속 확장
 
-```text
-ai-asset-copilot/
-├── README.md
-├── PROJECT_SPEC.md
-├── .gitignore
-├── .env.example
-├── pyproject.toml
-├── config/
-│   ├── us_portfolio_policy.toml
-│   └── kr_paper.toml
-├── docs/
-│   ├── ARCHITECTURE.md
-│   └── ROADMAP.md
-├── src/
-│   └── asset_copilot/
-│       ├── __init__.py
-│       ├── domain/
-│       │   ├── __init__.py
-│       │   ├── models.py
-│       │   └── repositories.py
-│       ├── portfolio/
-│       │   ├── __init__.py
-│       │   └── calculator.py
-│       └── storage/
-│           ├── __init__.py
-│           └── sqlite.py
-└── tests/
-    ├── test_bootstrap.py
-    ├── test_portfolio_domain.py
-    └── test_sqlite_repositories.py
-```
-
-Phase 1에서 `src/asset_copilot/domain/{models,repositories}.py`, `portfolio/calculator.py`, `storage/sqlite.py`를 추가했다. 그 이후 실제 use case가 생기는 순서대로 확장한다. `config/`는 현재 저장소 내 선언 파일이며 설치 패키지의 runtime resource 계약은 아직 없다. `.env.example`에는 실제 환경 변수나 credentials를 요구하지 않는다.
+main의 실제 코드 위치는 `src/asset_copilot/domain/{models,repositories}.py`, `portfolio/calculator.py`, `storage/sqlite.py`, `market/{provider,models,errors,twelve_data}.py`, `application/us_portfolio_analytics.py`다. 회귀 테스트는 `tests/test_portfolio_domain.py`, `test_sqlite_repositories.py`, `test_market_data.py`, `test_twelve_data.py`, `test_us_portfolio_analytics.py`와 bootstrap test에 있다. `config/`는 저장소 내 선언 파일이며 설치 패키지의 runtime resource 계약은 아직 없다. `.env.example`에는 실제 credentials를 요구하지 않는다.
 
 ## 9. 검증 전략
 
