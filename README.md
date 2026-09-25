@@ -1,6 +1,6 @@
 # ai-asset-copilot
 
-개인용 AI 자산운용 비서. 미국주식 장기 자산운용 보조와 한국주식 전략 검증·Paper Trading을 다룬다. 개인 현금흐름·월간 예산·목표저축은 새로 정의한 **미구현 제품 범위**이며 [BUD-01~04 계획](docs/ROADMAP.md#budget--cashflow-planning-확장)에서 구현 순서를 추적한다.
+개인용 AI 자산운용 비서. 주택 구매·노후 준비를 위한 개인 현금흐름·월간 예산과 미국주식 장기투자 보조, 한국주식 전략 검증·Paper Trading을 다룬다. 예산은 **미구현 제품 범위**이며 [BUD-01~04 계획](docs/ROADMAP.md#budget--cashflow-planning-확장)에서 추적한다. 향후 주 화면은 모바일·PC 웹앱, 텔레그램은 제한된 알림·조회이며 초기 실행 환경은 맥미니다. 목표 금액·시점과 개인화 전략은 미정이다.
 
 `main`에는 **Phase 3 — US Portfolio Analytics**까지 구현했다. 계좌 원장과 검증된 가격·FX를 연결하여 미국 USD 계좌의 현재 평가, 직접 Sector 노출, KRW 보고 환산을 계산한다. Phase 4 Policy Engine은 별도 미병합 후보이며 IN REVIEW / NOT DONE이다. 현재 기능은 Python API이고 실제 계좌 자료 입력·대사, 사용자 보고서, 주문, 역사적 성과 분석은 없다.
 
