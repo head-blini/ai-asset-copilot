@@ -96,7 +96,8 @@ def _allocation_evaluations(analysis: PortfolioAnalysis, config: PortfolioPolicy
                        "Analysis evidence is unsuitable for allocation evaluation")
     if not isinstance(analysis.positions, tuple) or not all(
             isinstance(item, PositionAnalysis) and isinstance(item.asset_type, AssetType)
-               and isinstance(item.asset_id, str) and item.asset_id.strip() for item in positions):
+               and isinstance(item.asset_id, str) and item.asset_id.strip()
+               for item in analysis.positions):
         return unknown(PolicyReason.INVALID_ANALYSIS, "Position identity or type is invalid")
     asset_ids = [item.asset_id for item in positions]
     if len(set(asset_ids)) != len(asset_ids):
@@ -264,8 +265,20 @@ class PortfolioPolicyEngine:
             stock_value, analysis.stock_exposure, total, total_stock_limits, reliable,
         ))
 
-        if analysis.direct_sector_exposure:
-            for sector in sorted(analysis.direct_sector_exposure, key=lambda item: item.sector):
+        sectors = analysis.direct_sector_exposure
+        sector_shape_ok = (isinstance(sectors, tuple)
+                           and all(isinstance(item, DirectSectorExposure)
+                                   and isinstance(item.sector, str) and item.sector.strip()
+                                   for item in sectors))
+        if sector_shape_ok:
+            sector_shape_ok = len({item.sector for item in sectors}) == len(sectors)
+        if not sector_shape_ok:
+            evaluations.append(_unknown(
+                PolicyKind.DIRECT_SECTOR, PolicyTarget(PolicyTargetKind.DIRECT_SECTOR),
+                None, sector_limits, PolicyReason.INVALID_ANALYSIS,
+                "Direct sector structure is invalid"))
+        elif sectors:
+            for sector in sorted(sectors, key=lambda item: item.sector):
                 evaluations.append(_concentration(
                     PolicyKind.DIRECT_SECTOR,
                     PolicyTarget(PolicyTargetKind.DIRECT_SECTOR, sector.sector),
@@ -289,7 +302,7 @@ class PortfolioPolicyEngine:
                 PolicyKind.DIRECT_SECTOR, PolicyTarget(PolicyTargetKind.UNCLASSIFIED_STOCK),
                 unknown_ratio, sector_limits, code, reason,
             ))
-        elif not analysis.direct_sector_exposure:
+        elif sector_shape_ok and not sectors:
             not_applicable.append(PolicyKind.DIRECT_SECTOR)
 
         cash_actual = analysis.cash_ratio if _valid_ratio(analysis.cash_ratio) else None

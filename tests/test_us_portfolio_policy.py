@@ -793,6 +793,32 @@ def test_invalid_position_type_and_container_do_not_claim_allocation_suitability
         PolicyReason.INVALID_ANALYSIS}
 
 
+@pytest.mark.parametrize("damaged", [None, object()])
+def test_extra_malformed_position_cannot_be_filtered_into_allocation_pass(damaged):
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(config()).evaluate(
+        replace(data, positions=data.positions + (damaged,)),
+        etf_classifications=complete_classifications(data))
+    assert {item.status for item in report.allocation_evaluations} == {PolicyStatus.UNKNOWN}
+    assert {item.reason_code for item in report.allocation_evaluations} == {
+        PolicyReason.INVALID_ANALYSIS}
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.UNKNOWN
+
+
+@pytest.mark.parametrize("damaged", [None, object()])
+def test_malformed_direct_sector_member_is_unknown_without_sorting_exception(damaged):
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(config()).evaluate(
+        replace(data, direct_sector_exposure=(damaged,)),
+        etf_classifications=complete_classifications(data))
+    sector = decision(report, PolicyKind.DIRECT_SECTOR)
+    assert (sector.status, sector.reason_code) == (
+        PolicyStatus.UNKNOWN, PolicyReason.INVALID_ANALYSIS)
+    assert {item.status for item in report.allocation_evaluations} == {PolicyStatus.UNKNOWN}
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.PASS
+    assert decision(report, PolicyKind.CASH_RATIO).status is PolicyStatus.PASS
+
+
 def test_allocation_repeating_boundary_is_stable_under_decimal_context_changes():
     third = D("0.3333333333333333333333333333333333333333")
     other = D("0.6666666666666666666666666666666666666667")
