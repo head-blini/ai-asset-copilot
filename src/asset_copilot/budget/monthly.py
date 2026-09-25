@@ -141,6 +141,7 @@ class GoalResult:
     contribution_date_this_month: date | None = None
     end_of_day_funding_gap: Decimal | None = None
     contribution_status: str = "UNCONFIRMED"
+    funding_check_status: str = "UNKNOWN"  # CHECKED, NOT_REQUIRED, UNKNOWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +193,7 @@ class BudgetResult:
     original_plan_margin: Decimal | None = None  # Only knowable from a month-start balance.
     current_cash: Decimal = ZERO
     expected_allocation_margin: Decimal | None = None
+    unpaid_card_due: Decimal = ZERO  # Observed charges without observed settlement.
 
 
 def _month_end(first: date) -> date:
@@ -481,9 +483,21 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                                    if item.kind in (EntryKind.CASH_SPEND, EntryKind.CARD_PAYMENT,
                                                     EntryKind.DEBT_PRINCIPAL, EntryKind.DEBT_COST)
                                    and item.day < evaluation_day and not item.observed)
+    charges = {item.id: item for item in entries if item.kind is EntryKind.CARD_CHARGE}
+    card_payments = {item.link_id: item for item in entries
+                     if item.kind is EntryKind.CARD_PAYMENT and not item.prior_period_card_payment}
+    unpaid_charges = tuple(item for item in charges.values() if item.observed and
+                           (item.id not in card_payments or not card_payments[item.id].observed))
+    unpaid_card_due = ZERO
+    for charge in unpaid_charges:
+        unpaid_card_due = _add(unpaid_card_due, charge.amount)
+    undated_card_ids = tuple(item.id for item in unpaid_charges
+                             if item.id not in card_payments)
     missing.extend(f"income_unconfirmed:{id}" for id in overdue_income_ids)
     missing.extend(f"obligation_unconfirmed:{id}" for id in overdue_obligation_ids)
-    critical_missing = tuple(item for item in missing if not item.startswith("income_unconfirmed:"))
+    missing.extend(f"card_payment_date:{id}" for id in undated_card_ids)
+    critical_missing = tuple(item for item in missing if not item.startswith(
+        ("income_unconfirmed:", "card_payment_date:")))
 
     end = _month_end(data.month)
     by_day: dict[date, list[CashEntry]] = {}
@@ -557,8 +571,10 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                                              pair[0].id))
     for goal, result in ordered_goals:
         contribution_date = date(data.month.year, data.month.month, goal.contribution_day)
-        if contribution_date < max(data.balance_date, evaluation_day) \
-                or result.contribution_status == "OBSERVED":
+        if result.required_monthly == ZERO or result.contribution_status == "OBSERVED":
+            checked_goals[goal.id] = replace(result, funding_check_status="NOT_REQUIRED")
+            continue
+        if contribution_date < max(data.balance_date, evaluation_day):
             checked_goals[goal.id] = result
             continue
         gap = None
@@ -581,8 +597,14 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
             gap = _positive_gap(new_lock, available)
             goal_locks[contribution_date] = _add(prior_same_day, new_lock)
         checked_goals[goal.id] = replace(result, contribution_date_this_month=contribution_date,
-                                         end_of_day_funding_gap=gap)
+                                         end_of_day_funding_gap=gap,
+                                         funding_check_status=("CHECKED" if gap is not None
+                                                               else "UNKNOWN"))
     goal_results = tuple(checked_goals[item.goal_id] for item in goal_results)
+    for goal in goal_results:
+        if goal.funding_check_status == "UNKNOWN" and not goal.missing and \
+                goal.contribution_date_this_month < evaluation_day:
+            missing.append(f"goal_contribution_confirmation:{goal.goal_id}")
 
     if policy is not None and policy.protected_floor is not None and not critical_missing:
         available_days = []
@@ -594,11 +616,21 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                         saved_through_day = _add(saved_through_day, contribution.amount)
             day_protected = max(data.existing_protected, policy.protected_floor,
                                 saved_through_day)
-            remaining_other = _sub(reserved_other,
-                                   _released_reservations(entries, day.day))
+            remaining_other = (_sub(reserved_other,
+                                    _released_reservations(entries, day.day))
+                               if day.day >= evaluation_day else ZERO)
+            current_goal_reservations = reserved_goals if day.day >= evaluation_day else ZERO
+            card_due_on_day = ZERO
+            for charge in charges.values():
+                payment = card_payments.get(charge.id)
+                settled_by_day = payment is not None and payment.day <= day.day and (
+                    payment.observed or payment.day >= evaluation_day)
+                if charge.observed and charge.day <= day.day and not settled_by_day:
+                    card_due_on_day = _add(card_due_on_day, charge.amount)
             available = _sub(_sub(_sub(day.ending_cash, day_protected),
                                   remaining_other),
-                             _add(reserved_goals, _sum_goal_locks(goal_locks, day.day)))
+                             _add(current_goal_reservations,
+                                  _add(_sum_goal_locks(goal_locks, day.day), card_due_on_day)))
             available_days.append(replace(day, available_cash=available,
                                           available_shortage=(
                                               _positive_gap(ZERO, available)
@@ -620,19 +652,16 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
         future_income = ZERO
         original_income = ZERO
         prior_card_due = original_prior_card_due = ZERO
-        charges = {item.id: item for item in entries if item.kind is EntryKind.CARD_CHARGE}
         for entry in entries:
             if entry.kind in (EntryKind.INCOME_ACTUAL, EntryKind.INCOME_PLANNED):
                 original_income = _add(original_income, entry.amount)
                 if entry.day > evaluation_day and entry.kind is EntryKind.INCOME_PLANNED:
                     future_income = _add(future_income, entry.amount)
             if entry.kind is EntryKind.CARD_PAYMENT:
-                linked_charge = charges.get(entry.link_id)
                 if entry.prior_period_card_payment:
                     original_prior_card_due = _add(original_prior_card_due, entry.amount)
                 if entry.day > evaluation_day or (entry.day == evaluation_day and not entry.observed):
-                    if entry.prior_period_card_payment or (linked_charge is not None
-                            and linked_charge.observed):
+                    if entry.prior_period_card_payment:
                         prior_card_due = _add(prior_card_due, entry.amount)
         future_unreserved: dict[tuple[BudgetCategory, str | None], Decimal] = {}
         for entry in entries:
@@ -656,16 +685,21 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                                   max(_sub(line.planned, line.used),
                                       _add(line.reserved, future_unreserved.get(key, ZERO)), ZERO))
             original_plan = _add(original_plan, max(line.planned, line.reserved))
-        margin = _sub(_sub(_sub(current_cash, protected), remaining_plan), prior_card_due)
+        margin = _sub(_sub(_sub(_sub(current_cash, protected), remaining_plan),
+                           prior_card_due), unpaid_card_due)
         expected_margin = _add(margin, future_income)
         if data.balance_date == data.month:
             opening_protected = max(data.existing_protected, policy.protected_floor)
             original_margin = _sub(_sub(_sub(_add(data.cash_balance, original_income), opening_protected),
                                         original_plan), original_prior_card_due)
         unallocated, shortage = max(margin, ZERO), _positive_gap(ZERO, margin)
-        if not overdue_income_ids and margin >= ZERO \
-                and all(item.shortage == ZERO and item.available_shortage == ZERO for item in days) \
-                and all(item.shortfall == ZERO and item.end_of_day_funding_gap == ZERO
+        if not overdue_income_ids and not undated_card_ids and margin >= ZERO \
+                and all(item.shortage == ZERO and item.available_shortage == ZERO
+                        for item in days if item.day >= evaluation_day) \
+                and all(item.shortfall == ZERO and
+                        (item.funding_check_status == "NOT_REQUIRED" or
+                         (item.funding_check_status == "CHECKED" and
+                          item.end_of_day_funding_gap == ZERO))
                         for item in goal_results):
             investment = ZERO
             for category in (BudgetCategory.US_INVEST, BudgetCategory.KR_STRATEGY):
@@ -679,6 +713,8 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
     reasons = []
     if margin is not None and margin < ZERO:
         reasons.append(f"current allocations and unpaid card dues exceed confirmed funding by {_sub(ZERO, margin)}")
+    for entry_id in undated_card_ids:
+        reasons.append(f"card charge {entry_id} is unpaid; supply its payment date to assess daily funding")
     for entry_id in overdue_income_ids:
         reasons.append(f"planned income {entry_id} is overdue and unconfirmed at {evaluation_day}")
     for entry_id in overdue_obligation_ids:
@@ -688,6 +724,10 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
             reasons.append(f"{line.category.value}{':' + line.goal_id if line.goal_id else ''} "
                            f"used/reserved exceeds allocation by {_sub(ZERO, line.remaining)}")
     for goal in goal_results:
+        if goal.funding_check_status == "UNKNOWN" and not goal.missing and \
+                goal.contribution_date_this_month < evaluation_day:
+            reasons.append(f"goal {goal.goal_id} contribution at {goal.contribution_date_this_month} "
+                           "needs an observed completion or an updated payment schedule")
         if goal.shortfall is not None and goal.shortfall > ZERO:
             reasons.append(f"goal {goal.goal_id} monthly contribution below required by {goal.shortfall}")
         if goal.end_of_day_funding_gap is not None and goal.end_of_day_funding_gap > ZERO:
@@ -713,4 +753,4 @@ def calculate_month(data: BudgetInput) -> BudgetResult:
                          "Planned income is forecast only until observed; overdue and uncertain income is excluded.",
                          "With incomplete records, ending cash uses known entries only and shortage is UNKNOWN.",
                          "Allocation is a proposal, not approval, transfer or order."),
-                        original_margin, current_cash, expected_margin)
+                        original_margin, current_cash, expected_margin, unpaid_card_due)

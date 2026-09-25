@@ -8,7 +8,7 @@ import pytest
 
 from examples.budget_monthly_offline import MONTH, entry, policy, render, sample_input
 from asset_copilot.budget import (Allocation, BudgetCategory as C, BudgetPolicy, EntryKind as K,
-                                  GoalContribution, calculate_month)
+                                  Goal, GoalContribution, calculate_month)
 
 
 D = Decimal
@@ -21,6 +21,14 @@ def line(result, category, goal_id=None):
 
 def day(result, number):
     return next(item for item in result.cash_days if item.day == date(2026, 9, number))
+
+
+def focused_policy(amounts, *, reserved=None, goal_rules=()):
+    reserved = reserved or {}
+    rules = tuple(Allocation(category, D(amounts.get(category, "0")),
+                             reserved=D(reserved.get(category, "0")))
+                  for category in C if category is not C.GOAL)
+    return BudgetPolicy(rules + goal_rules, D("0"), "synthetic-manual-example")
 
 
 def test_normal_month_preserves_categories_cash_and_provenance():
@@ -75,6 +83,7 @@ def test_unknown_home_goal_and_protection_do_not_hide_known_cashflow():
     assert home.missing == ("target_amount", "deadline")
     assert result.allocation_margin is result.unallocated is result.investment_proposal is None
     assert "protected_floor" in result.missing
+    assert "goal_contribution_confirmation:retirement" not in result.missing
     assert day(result, 26).ending_cash == D("2180")
     assert "required_monthly=None" in render("unknown_goal")
 
@@ -257,7 +266,8 @@ def test_additional_use_and_reservation_never_create_free_cash():
     assert (reserved.shortage, more_used.shortage, more_reserved.shortage) == (
         D("0"), D("100"), D("100"))
     assert line(reserved, C.LIVING).reserved == D("700")
-    assert day(reserved, 10).available_cash == D("0")
+    assert day(reserved, 10).available_cash == D("700")  # Current reservation has no past start date.
+    assert day(reserved, 25).available_cash == D("0")
 
 
 def test_linked_future_payment_consumes_one_reservation_without_double_charge():
@@ -267,7 +277,8 @@ def test_linked_future_payment_consumes_one_reservation_without_double_charge():
     linked = calculate_month(replace(base, entries=base.entries + (due,)))
     separate = calculate_month(replace(base, entries=base.entries +
                                        (replace(due, reservation_draw=D("0")),)))
-    assert day(linked, 10).available_cash == D("0")
+    assert day(linked, 10).available_cash == D("700")
+    assert day(linked, 25).available_cash == D("0")
     assert (day(linked, 26).ending_cash, day(linked, 26).available_cash) == (D("0"), D("0"))
     assert day(separate, 26).available_cash == D("-700")
     assert linked.allocation_margin == D("0")
@@ -522,3 +533,98 @@ def test_large_decimal_shortages_and_messages_ignore_caller_context(amount):
     assert first == second
     assert (first.shortage, day(first, 10).shortage) == (D(amount), D(amount))
     assert any(amount in reason for reason in first.shortage_reasons)
+
+
+@pytest.mark.parametrize("settlement", ("cash", "unscheduled", "scheduled", "paid"))
+def test_card_consumption_retains_one_cash_obligation_until_payment(settlement):
+    base = sample_input("overdue_salary")
+    spending = entry("living-use", 15,
+                     K.CASH_SPEND if settlement == "cash" else K.CARD_CHARGE,
+                     "900", category=C.LIVING, observed=True)
+    entries = (spending,)
+    if settlement in ("scheduled", "paid"):
+        entries += (entry("card-bill", 28 if settlement == "scheduled" else 20,
+                          K.CARD_PAYMENT, "900", link_id=spending.id,
+                          observed=settlement == "paid"),)
+    result = calculate_month(replace(base, entries=entries, goals=(),
+                                     policy=focused_policy({C.LIVING: "900", C.US_INVEST: "500"})))
+    assert line(result, C.LIVING).used == D("900")
+    assert result.allocation_margin == D("-400")
+    assert result.shortage == D("400")
+    assert result.investment_proposal is None
+    assert result.unpaid_card_due == (D("900") if settlement in ("unscheduled", "scheduled")
+                                      else D("0"))
+    assert day(result, 28).ending_cash == (D("1000") if settlement == "unscheduled"
+                                           else D("100"))
+    assert day(result, 28).available_cash == D("100")
+    if settlement == "unscheduled":
+        assert "card_payment_date:living-use" in result.missing
+        assert any("living-use" in reason for reason in result.shortage_reasons)
+
+
+def test_undated_card_due_blocks_even_with_positive_margin_until_schedule_is_known():
+    base = sample_input("overdue_salary")
+    charge = entry("undated-card", 15, K.CARD_CHARGE, "900", category=C.LIVING,
+                   observed=True)
+    result = calculate_month(replace(base, cash_balance=D("2000"), entries=(charge,),
+                                     policy=focused_policy({C.LIVING: "900", C.US_INVEST: "500"})))
+    assert (result.current_cash, result.unpaid_card_due, result.allocation_margin) == (
+        D("2000"), D("900"), D("600"))
+    assert result.investment_proposal is None
+    assert "card_payment_date:undated-card" in result.missing
+    assert any("supply its payment date" in reason for reason in result.shortage_reasons)
+
+
+@pytest.mark.parametrize("reserved", ("0", "200"))
+@pytest.mark.parametrize("past_shortage", (False, True))
+@pytest.mark.parametrize("balance_day", (1, 11, 25))
+def test_current_investment_decision_ignores_balance_start_and_historical_gaps(
+        reserved, past_shortage, balance_day):
+    base = sample_input("overdue_salary")
+    spent = (entry("past-living", 5, K.CASH_SPEND, "150", category=C.LIVING,
+                   observed=True),) if past_shortage else ()
+    income = entry("salary", 10, K.INCOME_ACTUAL, "1050" if past_shortage else "900",
+                   observed=True)
+    data = replace(base, balance_date=date(2026, 9, balance_day),
+                   cash_balance=D("100") if balance_day == 1 else D("1000"),
+                   entries=spent + (income,), goals=(),
+                   policy=focused_policy({C.LIVING: "200", C.US_INVEST: "500"},
+                                         reserved={C.LIVING: reserved}))
+    result = calculate_month(data)
+    assert result.current_cash == D("1000")
+    assert result.allocation_margin == (D("300") if reserved == "200" else
+                                        D("450") if past_shortage else D("300"))
+    assert result.investment_proposal == D("500")
+    if balance_day == 1 and (past_shortage or reserved == "200"):
+        assert day(result, 5).available_cash == (D("-50") if past_shortage else D("100"))
+
+
+@pytest.mark.parametrize("observed,paid,target,expected_proposal", (
+    (True, "800", "800", D("500")),
+    (True, "800", "1200", D("500")),
+    (True, "300", "800", None),
+    (False, "0", "800", None),
+    (True, "300", "300", D("500")),
+    (False, "0", "0", D("500")),
+))
+def test_goal_funding_check_separates_completed_partial_and_unconfirmed(
+        observed, paid, target, expected_proposal):
+    base = sample_input("overdue_salary")
+    contribution = (GoalContribution(date(2026, 9, 5), D(paid),
+                                     "synthetic-goal-payment", base.evaluated_at),) if observed else ()
+    goal = Goal("home", "HOME", D(target), date(2026, 10, 30), D(paid), 5, 1,
+                "synthetic-manual-example", contribution)
+    data = replace(base, cash_balance=D("3000"), entries=(), goals=(goal,),
+                   policy=focused_policy({C.US_INVEST: "500"},
+                                         goal_rules=(Allocation(C.GOAL, D("800"), "home"),)))
+    result = calculate_month(data)
+    assert result.goals[0].contribution_status == (
+        "OBSERVED" if observed and paid == "800" else
+        "PARTIAL" if observed else "OVERDUE_UNCONFIRMED")
+    assert result.goals[0].end_of_day_funding_gap is None
+    assert result.goals[0].funding_check_status == (
+        "NOT_REQUIRED" if target == paid or observed and paid == "800" else "UNKNOWN")
+    assert result.investment_proposal == expected_proposal
+    if expected_proposal is None:
+        assert any("goal home" in reason for reason in result.shortage_reasons)
+        assert "goal_contribution_confirmation:home" in result.missing
