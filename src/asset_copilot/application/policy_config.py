@@ -4,11 +4,16 @@ from decimal import Decimal
 from pathlib import Path
 import tomllib
 
-from asset_copilot.domain.policy import PortfolioPolicyConfig
+from asset_copilot.domain.policy import AllocationBand, AllocationBucket, PortfolioPolicyConfig
 from asset_copilot.portfolio.calculator import _add, _div
 
 
-_BUCKETS = ("core_etf", "growth_etf", "individual_stocks", "cash")
+_BUCKETS = (
+    (AllocationBucket.CORE_ETF, "core_etf"),
+    (AllocationBucket.GROWTH_ETF, "growth_etf"),
+    (AllocationBucket.INDIVIDUAL_STOCKS, "individual_stocks"),
+    (AllocationBucket.CASH, "cash"),
+)
 ZERO = Decimal("0")
 ONE = Decimal("1")
 HUNDRED = Decimal("100")
@@ -43,8 +48,8 @@ def _percent(data: dict, name: str) -> Decimal:
 def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
     """Load the closed percentage-point schema; reject unrecognized keys at every level.
 
-    Allocation targets/ranges are validated here, but full allocation evaluation
-    and policy change authorization remain open Phase 4 acceptance criteria.
+    All allocation targets/ranges are retained for evaluation. Policy change
+    authorization and history remain separate open Phase 4 criteria.
     """
     with Path(path).open("rb") as source:
         data = tomllib.load(source, parse_float=Decimal)
@@ -54,19 +59,19 @@ def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
     targets = _table(data, "target_percent")
     ranges = _table(data, "range_percent")
     risk = _table(data, "risk_percent")
-    _keys(targets, set(_BUCKETS), path="target_percent")
-    _keys(ranges, set(_BUCKETS), path="range_percent")
+    _keys(targets, {name for _, name in _BUCKETS}, path="target_percent")
+    _keys(ranges, {name for _, name in _BUCKETS}, path="range_percent")
     _keys(risk, {"individual_position_max", "concentration_warning", "sector_max",
                  "individual_stocks_total_max"}, path="risk_percent",
           optional=frozenset({"sector_warning"}))
     total_target = ZERO
-    for bucket in _BUCKETS:
-        target = _percent(targets, bucket)
-        band = _table(ranges, bucket)
-        _keys(band, {"min", "max"}, path=f"range_percent.{bucket}")
+    allocation_bands: list[AllocationBand] = []
+    for bucket, name in _BUCKETS:
+        target = _percent(targets, name)
+        band = _table(ranges, name)
+        _keys(band, {"min", "max"}, path=f"range_percent.{name}")
         minimum, maximum = _percent(band, "min"), _percent(band, "max")
-        if not minimum <= target <= maximum:
-            raise ValueError(f"{bucket} target must lie within its range")
+        allocation_bands.append(AllocationBand(bucket, target, minimum, maximum))
         total_target = _add(total_target, target)
     if total_target != ONE:
         raise ValueError("allocation targets must sum to 100 percent")
@@ -88,4 +93,5 @@ def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
         direct_sector_breach_ratio=_percent(risk, "sector_max"),
         min_cash_ratio=_percent(_table(ranges, "cash"), "min"),
         max_cash_ratio=_percent(_table(ranges, "cash"), "max"),
+        allocation_bands=tuple(allocation_bands),
     )
