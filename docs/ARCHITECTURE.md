@@ -106,9 +106,11 @@ flowchart TD
 
 ## 4. 인간 Policy와 AI 경계
 
-Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고 네 자산군의 target/min/max를 불변 입력에 보존한다. Evaluator는 개별 STOCK 집중도·전체 STOCK 한도·직접 Sector 집중도·Cash Range와 별도의 네 자산군 배분 결과를 반환한다. ETF Core/Growth는 caller가 `asset_id`로 명시하며 ticker에서 추론하지 않는다. 중복·잘못된 분류는 거부하고 미분류 ETF나 불일치하는 분석 금액은 배분 결과의 `UNKNOWN` 이유로 남긴다. Range 경계는 양 끝 포함이고 목표 편차는 판정과 별도로 표시한다. 배분 PASS는 독립 Risk BREACH를 지우거나 전체 적합을 뜻하지 않는다. Loader는 모든 계층의 키를 확인해 unknown/missing key와 malformed 값을 거부한다. P4-05 후보는 검토 중이며 변경 이력·권한·적용 시점은 ROADMAP의 Phase 4 완료 조건에 남는다.
+Policy 값은 [기본 설정](../config/us_portfolio_policy.toml)에 선언되어 있다. 코드에 수치를 복제하지 않는다. Phase 4 loader는 단위·합계·범위·한도 간 일관성을 검증하고 네 자산군의 target/min/max를 불변 입력에 보존한다. Evaluator는 개별 STOCK 집중도·전체 STOCK 한도·직접 Sector 집중도·Cash Range와 별도의 네 자산군 배분 결과를 반환한다. ETF Core/Growth는 caller가 `asset_id`로 명시하며 ticker에서 추론하지 않는다. 중복·잘못된 분류는 거부하고 미분류 ETF나 불일치하는 분석 금액은 배분 결과의 `UNKNOWN` 이유로 남긴다. Range 경계는 양 끝 포함이고 목표 편차는 판정과 별도로 표시한다. 배분 PASS는 독립 Risk BREACH를 지우거나 전체 적합을 뜻하지 않는다. Loader는 모든 계층의 키를 확인해 unknown/missing key와 malformed 값을 거부한다. P4-05는 PR #2에서 검토 중이며 P4-06/07은 별도 후속 후보이다.
 
-향후 application은 인간이 승인한 Policy 버전을 읽어 Risk Engine에 전달한다. AI에는 분석에 필요한 읽기 전용 데이터만 제공하며, Policy 저장소 쓰기 권한과 Broker credentials를 제공하지 않는다. Policy 변경 경로는 AI 제안 경로에서 분리하고 인간의 변경 이력과 적용 시점을 남긴다. 이를 강제하는 구체적 권한 구조는 OD-02에서 결정한다.
+P4-06/07 후속 후보의 `PolicyOperator`는 신뢰된 로컬 운영자 실행 경로에서만 생성하며, 별도 보관한 32바이트 이상의 승인 키와 시계를 받는다. `PolicyApprovalAuthority`는 그 키로 정확한 revision ID·원문과 검증 설정을 묶은 content ID·계좌 scope·승인 및 적용 시각을 서명한다. 객체의 `actor` 문자열이나 frozen 여부는 권한이 아니다. `PolicyEvaluator`는 적용본을 조회해 기존 순수 `PortfolioPolicyEngine`을 호출하고 평가 증거만 추가한다. AI/평가 경로에는 승인 키와 `PolicyOperator`를 주입하지 않는다. `PolicyReader`는 SQLite read-only 모드로 열고, 평가 연결의 SQL authorizer는 Policy 쓰기와 DDL을 거부한다. 운영 배치에서는 운영자와 평가/AI를 별도 OS 사용자·파일 권한으로 분리해야 한다. 이 후보는 같은 OS 권한으로 임의 Python을 실행하거나 키·DB 파일에 접근하는 공격자를 막는다고 주장하지 않으며, 실제 인간 신원 확인·키 보관·프로세스 권한 분리는 아직 검증하지 않았다.
+
+정책 원문 bytes를 한 번 읽어 기존 TOML validator로 검증하고, 원문과 검증된 설정을 content ID에 결속해 SQLite에 append-only revision으로 기록한다. 같은 scope/version의 덮어쓰기와 stale expected-head 변경을 거부하고 동일 request ID의 동일 요청만 재사용한다. 승인본은 기록·승인 이후의 적용 시각만 허용하며 경계 시각부터 포함한다. 그 이전에는 직전 승인본을 선택하고 없으면 명시적으로 실패한다. 평가 기록은 당시 `PortfolioAnalysis`·명시적 ETF 분류·보고서·revision/content ID·시각·평가 코드 지문을 보존한다. 재개방 후 당시 입력으로 다시 평가해 동일한 결과를 확인하며 최신 파일·분류로 대체하지 않는다. 저장소, 승인, 기록은 evaluator 밖 application 경계에 있고 기존 Ledger/예산 테이블은 변경하지 않는다. 이 경로는 보유 평가 기록이며 주문 Risk 승인이나 실제 금융 Policy 승인이 아니다.
 
 AI 출력은 검증되지 않은 입력으로 취급한다. Research 문서나 모델 응답 안의 명령은 시스템 권한을 변경할 수 없다. 금융 계산, Risk Limit 및 Order Quantity는 코드에서 생성한 결과를 사용한다. LLM이 임의로 작성한 수치를 잔고·손익·Risk 판정으로 저장하지 않는다.
 
