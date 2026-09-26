@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>로컬 월간 예산 미리보기</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/form.js" defer></script>
+</head>
+<body>
+{% macro field(name, label, value='', type='text', hint='', maxlength=160) -%}
+<label class="field" for="{{ name }}"><span>{{ label }}</span>
+  <input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ value }}" maxlength="{{ maxlength }}"{% if type == 'text' %} autocomplete="off"{% endif %}{% if name.startswith('allocation.') or name.endswith('.amount') or name in ['cash_balance','existing_protected','protected_floor'] %} inputmode="decimal"{% endif %}>
+  {% if hint %}<small>{{ hint }}</small>{% endif %}
+</label>
+{%- endmacro %}
+{% macro choice(name, label, value, options) -%}
+<label class="field" for="{{ name }}"><span>{{ label }}</span><select id="{{ name }}" name="{{ name }}">
+  <option value=""{% if value == '' %} selected{% endif %}>선택해 주세요</option>
+  {% for code, title in options %}<option value="{{ code }}"{% if value == code %} selected{% endif %}>{{ title }}</option>{% endfor %}
+</select></label>
+{%- endmacro %}
+{% macro entry_row(row, i) -%}
+<div class="repeat-row" data-row="entry">
+  <div class="row-head"><strong>현금흐름 {{ i if i != '__INDEX__' else '새 행' }}</strong><button type="button" class="quiet remove-row">행 삭제</button></div>
+  <div class="grid compact">
+    {{ field('entry.' ~ i ~ '.id','내역 ID',row.get('id',''),maxlength=64) }}
+    {{ choice('entry.' ~ i ~ '.kind','유형',row.get('kind',''),entry_options) }}
+    {{ field('entry.' ~ i ~ '.day','발생일',row.get('day',''),hint='YYYY-MM-DD',maxlength=10) }}
+    {{ field('entry.' ~ i ~ '.amount','금액 · 원',row.get('amount',''),maxlength=32) }}
+    {{ choice('entry.' ~ i ~ '.category','지출 용도',row.get('category',''),[('','해당 없음'),('FIXED','고정비'),('LIVING','생활비'),('FREEDOM','자유지출')]) }}
+    {{ choice('entry.' ~ i ~ '.observed','관측 여부',row.get('observed',''),[('yes','실제 관측'),('no','예정·미관측')]) }}
+  </div>
+  <details><summary>연결·출처 상세</summary><div class="grid compact">
+    {{ field('entry.' ~ i ~ '.link_id','연결 ID',row.get('link_id',''),hint='카드 납부에는 카드 사용 ID, 본인 이체에는 양쪽 동일 ID',maxlength=64) }}
+    {{ choice('entry.' ~ i ~ '.prior_period_card_payment','이전 달 카드대금',row.get('prior_period_card_payment',''),[('no','아니요'),('yes','예')]) }}
+    {{ field('entry.' ~ i ~ '.gross_income','세전 소득 · 참고값',row.get('gross_income',''),maxlength=32) }}
+    {{ field('entry.' ~ i ~ '.reservation_draw','연결된 예약 사용액 · 원',row.get('reservation_draw',''),maxlength=32) }}
+    {{ field('entry.' ~ i ~ '.recorded_at','기록 시각 · ISO 시간대 포함',row.get('recorded_at',''),hint='예: 2026-09-25T18:00:00+09:00',maxlength=40) }}
+    {{ field('entry.' ~ i ~ '.source','자료 출처',row.get('source','manual-local-web')) }}
+  </div></details>
+</div>
+{%- endmacro %}
+{% macro goal_row(row, i) -%}
+<div class="repeat-row" data-row="goal">
+  <div class="row-head"><strong>목표 {{ i if i != '__INDEX__' else '새 행' }}</strong><button type="button" class="quiet remove-row">행 삭제</button></div>
+  <div class="grid compact">
+    {{ field('goal.' ~ i ~ '.id','목표 ID',row.get('id',''),maxlength=64) }}
+    {{ choice('goal.' ~ i ~ '.kind','목표 유형',row.get('kind',''),[('HOME','주택'),('RETIREMENT','노후'),('OTHER','기타')]) }}
+    {{ field('goal.' ~ i ~ '.target_amount','목표금액 · 미정이면 빈칸',row.get('target_amount',''),maxlength=32) }}
+    {{ field('goal.' ~ i ~ '.deadline','기한 · 미정이면 빈칸',row.get('deadline',''),hint='YYYY-MM-DD',maxlength=10) }}
+    {{ field('goal.' ~ i ~ '.saved_amount','현재까지 적립액 · 원',row.get('saved_amount',''),maxlength=32) }}
+    {{ field('goal.' ~ i ~ '.contribution_day','매월 납입일 · 1~28',row.get('contribution_day',''),maxlength=2) }}
+    {{ field('goal.' ~ i ~ '.priority','우선순위 · 1부터',row.get('priority',''),maxlength=3) }}
+    {{ choice('goal.' ~ i ~ '.allocation_state','이번 달 목표 배정',row.get('allocation_state',''),[('unset','아직 정하지 않음'),('none','배정 없음 · 0원'),('amount','금액 입력')]) }}
+    {{ field('goal.' ~ i ~ '.allocation_amount','목표 배정액 · 원',row.get('allocation_amount',''),maxlength=32) }}
+    {{ field('goal.' ~ i ~ '.allocation_reserved','현재 예약액 · 원',row.get('allocation_reserved',''),maxlength=32) }}
+    {{ field('goal.' ~ i ~ '.source','자료 출처',row.get('source','manual-local-web')) }}
+  </div>
+</div>
+{%- endmacro %}
+{% macro contribution_row(row, i) -%}
+<div class="repeat-row" data-row="contribution">
+  <div class="row-head"><strong>관측 납입 {{ i if i != '__INDEX__' else '새 행' }}</strong><button type="button" class="quiet remove-row">행 삭제</button></div>
+  <div class="grid compact">
+    {{ field('contribution.' ~ i ~ '.goal_id','목표 ID 연결',row.get('goal_id',''),maxlength=64) }}
+    {{ field('contribution.' ~ i ~ '.day','납입일',row.get('day',''),hint='YYYY-MM-DD',maxlength=10) }}
+    {{ field('contribution.' ~ i ~ '.amount','신규 보호 배정액 · 원',row.get('amount',''),maxlength=32) }}
+    {{ choice('contribution.' ~ i ~ '.included','잔액 기준일 보호총액에 포함',row.get('included',''),[('yes','이미 포함'),('no','아직 미포함')]) }}
+    {{ choice('contribution.' ~ i ~ '.protection_source','보호 자금 출처',row.get('protection_source',''),[('FREE_CASH','자유자금에서 신규 적립')]) }}
+    {{ field('contribution.' ~ i ~ '.recorded_at','관측 기록 시각 · ISO 시간대 포함',row.get('recorded_at',''),maxlength=40) }}
+    {{ field('contribution.' ~ i ~ '.source','자료 출처',row.get('source','manual-local-web')) }}
+  </div>
+</div>
+{%- endmacro %}
+<div class="page">
+  <header class="masthead"><div><p class="eyebrow">LOCAL / BUDGET PREVIEW</p><h1>월간 예산 미리보기</h1><p>직접 입력한 자료와 배정안으로 기존 BUD-01 계산기를 실행합니다. 저장되지 않는 미리보기입니다.</p></div><span class="pill">로컬 전용 · KRW</span></header>
+  <section class="notice" aria-label="사용 범위"><strong>계산 결과는 제안·승인이 아닙니다.</strong> 투자 배정은 입력한 정책의 산출값이며 송금 가능 보증이나 개인화 매수 추천이 아닙니다. 실제 계좌 연결·저장·주문은 없습니다.</section>
+  <section class="example-panel"><div><h2>시작 방식</h2><p>기본은 직접 입력입니다. 예제를 고르면 현재 입력 화면을 명시적으로 대체합니다.</p></div><div class="examples"><a href="/" class="button secondary">직접 입력 새로 시작</a>{% for scenario in scenarios %}<a href="/examples/{{ scenario }}" class="button secondary example-link">{{ scenario }}</a>{% endfor %}</div></section>
+  {% if form.example_id %}<p class="example-badge">가상 예제 기반: {{ form.example_id }} · 실제 사용자 기본값이 아닙니다.</p>{% endif %}
+  {% if error %}<div class="error" role="alert" id="form-error" tabindex="-1"><strong>계산할 수 없습니다.</strong><p>{{ error }}</p><a href="#{{ error_anchor }}">관련 입력으로 이동: {{ error.field }}</a></div>{% endif %}
+  <p id="dirty-message" class="notice subtle" hidden>입력을 수정했습니다. 아래 계산 버튼을 눌러 새 결과를 확인하세요.</p>
+  <form method="post" action="/calculate" id="budget-form" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ token }}">
+    <input type="hidden" name="example_id" value="{{ form.example_id }}">
+    <section class="panel"><div class="section-heading"><div><p class="step">01 / 시점과 잔액</p><h2>어느 때의 돈인가요?</h2></div><p>평가 시각에는 시간대(+09:00 등)를 명시해 주세요.</p></div>
+      <div class="grid">
+        {{ field('month','기준 월',form.month,hint='YYYY-MM',maxlength=7) }}
+        {{ field('evaluated_at','평가 시각 · ISO 시간대 포함',form.evaluated_at,hint='예: 2026-09-25T18:00:00+09:00',maxlength=40) }}
+        {{ field('balance_date','잔액 기준일',form.balance_date,hint='YYYY-MM-DD',maxlength=10) }}
+        {{ field('cash_balance','총현금 · 원',form.cash_balance,maxlength=32) }}
+        {{ field('existing_protected','기준일 기존 보호총액 · 원',form.existing_protected,maxlength=32) }}
+        {{ field('protected_floor','보호총액 하한 · 원',form.protected_floor,hint='같은 보호총액의 하한입니다. 추가 보호액이 아닙니다.',maxlength=32) }}
+        {{ field('balance_source','잔액 자료 출처',form.balance_source) }}
+        {{ field('policy_source','배정안 자료 출처',form.policy_source) }}
+      </div>
+    </section>
+    <section class="panel"><div class="section-heading"><div><p class="step">02 / 완전성</p><h2>입력 범위 확인</h2></div><p>빈 내역만으로 완전하다고 간주하지 않습니다.</p></div>
+      <div class="grid">
+        {{ choice('income_complete','소득 기록이 완전한가요?',form.income_complete,[('yes','예, 확인했습니다'),('no','아니요 / 불확실')]) }}
+        {{ choice('obligations_complete','지출·의무 기록이 완전한가요?',form.obligations_complete,[('yes','예, 확인했습니다'),('no','아니요 / 불확실')]) }}
+        {{ choice('entries_mode','이번 달 현금흐름 내역',form.entries_mode,[('none','해당 없음 확인'),('rows','입력 행 사용')]) }}
+        {{ choice('goals_mode','이번 달 목표',form.goals_mode,[('none','목표 없음 확인'),('rows','목표 입력')]) }}
+        {{ choice('policy_mode','배정안',form.policy_mode,[('none','배정안 없음 확인'),('rows','용도별 입력')]) }}
+      </div>
+    </section>
+    <section class="panel"><div class="section-heading"><div><p class="step">03 / 배정안</p><h2>사용자가 정한 월 배정</h2></div><p>금액 빈칸과 0원은 다릅니다. 각 항목에서 배정 없음을 선택하거나 금액을 입력하세요.</p></div>
+      <div class="allocation-list">
+      {% for category in categories %}{% set cell = form.allocations[category.value] %}
+      <div class="allocation-item"><strong>{{ labels[category.value] }}</strong>
+        {{ choice('allocation.' ~ category.value ~ '.state','배정 상태',cell.state,[('none','배정 없음 · 0원'),('amount','금액 입력')]) }}
+        {{ field('allocation.' ~ category.value ~ '.amount','계획액 · 원',cell.amount,maxlength=32) }}
+        {{ field('allocation.' ~ category.value ~ '.reserved','현재 예약액 · 원',cell.reserved,maxlength=32) }}
+      </div>{% endfor %}</div>
+    </section>
+    <details class="panel detail-panel"{% if form.entries %} open{% endif %}><summary><span><span class="step">04 / 상세 입력</span><strong>소득·지출·카드·부채·이체</strong></span><span>필요할 때 펼치기</span></summary>
+      <p class="help">실제 소득과 관측 지출은 관측 여부를 선택합니다. 카드 납부는 카드 사용 ID와 연결합니다. 기록 시각은 평가 시각 이후일 수 없습니다.</p>
+      <div id="entry-rows" class="rows">{% for row in form.entries %}{{ entry_row(row, loop.index0) }}{% endfor %}</div>
+      <button type="button" class="button secondary add-row" data-kind="entry">+ 내역 추가</button>
+    </details>
+    <details class="panel detail-panel"{% if form.goals or form.contributions %} open{% endif %}><summary><span><span class="step">05 / 상세 입력</span><strong>주택·노후 목표와 관측 납입</strong></span><span>필요할 때 펼치기</span></summary>
+      <p class="help">목표금액·기한 미정은 빈칸으로 두되, 목표 자체가 없으면 위에서 ‘목표 없음’을 선택하세요. 관측 납입의 보호총액 포함 여부는 직접 확인해야 합니다. 기존 보호자금의 목적 전환은 지원하지 않습니다.</p>
+      <div id="goal-rows" class="rows">{% for row in form.goals %}{{ goal_row(row, loop.index0) }}{% endfor %}</div>
+      <button type="button" class="button secondary add-row" data-kind="goal">+ 목표 추가</button>
+      <h3>실제 관측된 신규 목표 적립</h3>
+      <div id="contribution-rows" class="rows">{% for row in form.contributions %}{{ contribution_row(row, loop.index0) }}{% endfor %}</div>
+      <button type="button" class="button secondary add-row" data-kind="contribution">+ 관측 납입 추가</button>
+    </details>
+    <div class="submit-bar"><p>입력은 서버 메모리에서 이번 요청 동안만 계산하고 저장하지 않습니다.</p><button type="submit" class="button primary">월간 예산 계산</button></div>
+  </form>
+  {% if result %}
+  <section id="result" class="result" aria-live="polite"><div class="result-head"><div><p class="step">계산 완료 / {{ result.month.strftime('%Y-%m') }}</p><h2>확인된 자금과 배정 결과</h2><p>평가 {{ result.evaluated_at.isoformat() }} · 잔액 기준 {{ result.balance_date }}</p></div>{% if form.example_id %}<span class="example-badge">가상 예제 기반</span>{% endif %}</div>
+    <div class="metrics">
+      <article><span>현재 확인된 현금</span><strong>{{ result.current_cash|display }} 원</strong></article>
+      <article><span>미결제 카드 의무</span><strong>{{ result.unpaid_card_due|display }} 원</strong></article>
+      <article><span>현재 배정 여력</span><strong>{{ result.allocation_margin|display }}{% if result.allocation_margin is not none %} 원{% endif %}</strong></article>
+      <article><span>현재 부족액</span><strong>{{ result.shortage|display }}{% if result.shortage is not none %} 원{% endif %}</strong></article>
+      <article><span>미배정액</span><strong>{{ result.unallocated|display }}{% if result.unallocated is not none %} 원{% endif %}</strong></article>
+      <article><span>입력 정책에 따른 신규 투자 배정 가능액</span><strong>{{ result.investment_proposal|display }}{% if result.investment_proposal is not none %} 원{% endif %}</strong></article>
+    </div>
+    <div class="result-grid"><article class="result-card"><h3>원안과 전망</h3><dl><div><dt>월초 원안 여력</dt><dd>{{ result.original_plan_margin|display }}</dd></div><div><dt>미래 예정 소득 포함 예상 여력</dt><dd>{{ result.expected_allocation_margin|display }}</dd></div></dl><p>예정 소득은 현재 확인된 현금이 아닙니다.</p></article>
+      <article class="result-card"><h3>누락·부족 사유</h3><ul>{% for item in result.missing %}<li>필요한 입력: {{ item|explain }}</li>{% endfor %}{% for item in result.shortage_reasons %}<li>{{ item|explain }}</li>{% endfor %}{% if not result.missing and not result.shortage_reasons %}<li>추가 누락·부족 사유 없음</li>{% endif %}</ul></article></div>
+    <div class="result-card"><h3>사용자가 입력한 배정안과 계산된 잔여 · 원</h3><div class="table-scroll"><table><thead><tr><th>용도</th><th>계획</th><th>사용</th><th>예약</th><th>잔여</th></tr></thead><tbody>{% for item in result.allocations %}<tr><th>{{ item.category|display }}{% if item.goal_id %} · {{ item.goal_id }}{% endif %}</th><td>{{ item.planned|display }}</td><td>{{ item.used|display }}</td><td>{{ item.reserved|display }}</td><td>{{ item.remaining|display }}</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="result-card"><h3>날짜별 현금 · 원</h3><div class="table-scroll"><table><thead><tr><th>일자</th><th>상태</th><th>총현금</th><th>가용현금</th><th>현금 부족</th><th>가용 부족</th></tr></thead><tbody>{% for day in result.cash_days %}<tr><th>{{ day.day }}</th><td>{{ day.cash_status|display }}</td><td>{{ day.ending_cash|display }}</td><td>{{ day.available_cash|display }}</td><td>{{ day.shortage|display }}</td><td>{{ day.available_shortage|display }}</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="result-card"><h3>목표 납입과 자금 검사</h3>{% if not result.goals %}<p>입력된 목표 없음</p>{% endif %}<div class="goal-results">{% for goal in result.goals %}<article><h4>{{ goal.kind|display }} · {{ goal.goal_id }}</h4><dl><div><dt>필요 월 적립액</dt><dd>{{ goal.required_monthly|display }}</dd></div><div><dt>이번 달 납입일</dt><dd>{{ goal.contribution_date_this_month|display }}</dd></div><div><dt>납입 상태</dt><dd>{{ goal.contribution_status|display }}</dd></div><div><dt>자금 검사</dt><dd>{{ goal.funding_check_status|display }}</dd></div><div><dt>납입 부족액</dt><dd>{{ goal.shortfall|display }}</dd></div><div><dt>납입일 자금 부족</dt><dd>{{ goal.end_of_day_funding_gap|display }}</dd></div></dl>{% if goal.missing %}<p>필요한 입력: {% for item in goal.missing %}{{ item|explain }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}</article>{% endfor %}</div></div>
+    <div class="result-card"><h3>출처·가정·한계</h3><p>출처: {{ result.sources|join(', ') }}</p><ul>{% for item in result.assumptions %}<li>{{ item|explain }}</li>{% endfor %}</ul><p>금액은 API Decimal 원값을 표시합니다. 화면 결과는 승인, 송금, 주문, 장중 잔고 보장이 아닙니다.</p></div>
+  </section>
+  {% endif %}
+</div>
+<template id="entry-template">{{ entry_row({}, '__INDEX__') }}</template>
+<template id="goal-template">{{ goal_row({}, '__INDEX__') }}</template>
+<template id="contribution-template">{{ contribution_row({}, '__INDEX__') }}</template>
+</body></html>
