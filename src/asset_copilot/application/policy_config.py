@@ -45,14 +45,11 @@ def _percent(data: dict, name: str) -> Decimal:
     return _div(percent, HUNDRED)
 
 
-def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
-    """Load the closed percentage-point schema; reject unrecognized keys at every level.
-
-    All allocation targets/ranges are retained for evaluation. Policy change
-    authorization and history remain separate open Phase 4 criteria.
-    """
-    with Path(path).open("rb") as source:
-        data = tomllib.load(source, parse_float=Decimal)
+def parse_portfolio_policy_config(raw: bytes) -> PortfolioPolicyConfig:
+    """Validate the exact TOML bytes retained by policy history."""
+    if not isinstance(raw, bytes):
+        raise TypeError("policy source must be bytes")
+    data = tomllib.loads(raw.decode("utf-8"), parse_float=Decimal)
     if not isinstance(data, dict):
         raise ValueError("policy must be a TOML table")
     _keys(data, {"policy_version", "target_percent", "range_percent", "risk_percent"}, path="root")
@@ -95,3 +92,8 @@ def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
         max_cash_ratio=_percent(_table(ranges, "cash"), "max"),
         allocation_bands=tuple(allocation_bands),
     )
+
+
+def load_portfolio_policy_config(path: str | Path) -> PortfolioPolicyConfig:
+    """Load the closed percentage-point schema; reject unknown keys at every level."""
+    return parse_portfolio_policy_config(Path(path).read_bytes())

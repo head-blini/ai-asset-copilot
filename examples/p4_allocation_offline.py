@@ -36,8 +36,8 @@ class SyntheticFeed:
         return FxQuote(base, quote, D("1300"), NOW, NOW, "offline fixture")
 
 
-def run_example(database: Path) -> tuple[PortfolioPolicyReport, PortfolioPolicyReport]:
-    """Return complete and missing-classification reports over the same analysis."""
+def synthetic_analysis(database: Path):
+    """Build one synthetic account and return its completed analysis."""
     with SQLiteStore(database) as store:
         store.portfolios.add(Portfolio(id="demo", name="Synthetic portfolio"))
         store.accounts.add(Account(id="us-account", portfolio_id="demo", name="Synthetic USD",
@@ -68,15 +68,21 @@ def run_example(database: Path) -> tuple[PortfolioPolicyReport, PortfolioPolicyR
                                        SyntheticFeed()).analyze(
             "us-account", evaluated_at=NOW, max_quote_age=timedelta(minutes=1),
             max_fx_age=timedelta(minutes=1))
-        engine = PortfolioPolicyEngine(load_portfolio_policy_config(POLICY_FILE))
-        complete = engine.evaluate(analysis, etf_classifications=(
-            ETFClassification("core", ETFGroup.CORE),
-            ETFClassification("growth", ETFGroup.GROWTH),
-        ))
-        missing = engine.evaluate(analysis, etf_classifications=(
-            ETFClassification("core", ETFGroup.CORE),
-        ))
-        return complete, missing
+        return analysis
+
+
+def run_example(database: Path) -> tuple[PortfolioPolicyReport, PortfolioPolicyReport]:
+    """Return complete and missing-classification reports over the same analysis."""
+    analysis = synthetic_analysis(database)
+    engine = PortfolioPolicyEngine(load_portfolio_policy_config(POLICY_FILE))
+    complete = engine.evaluate(analysis, etf_classifications=(
+        ETFClassification("core", ETFGroup.CORE),
+        ETFClassification("growth", ETFGroup.GROWTH),
+    ))
+    missing = engine.evaluate(analysis, etf_classifications=(
+        ETFClassification("core", ETFGroup.CORE),
+    ))
+    return complete, missing
 
 
 if __name__ == "__main__":
