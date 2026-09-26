@@ -1,5 +1,6 @@
 """HTTP and form regressions for the optional local budget preview."""
 
+import asyncio
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -9,13 +10,14 @@ from urllib.parse import urlencode
 import pytest
 pytest.importorskip("fastapi", reason="optional web extra is not installed in core CI")
 pytest.importorskip("httpx", reason="optional web test extra is not installed in core CI")
+import httpx
 from fastapi.testclient import TestClient
 
 from asset_copilot.budget import (Allocation, BudgetCategory as C, BudgetInput, BudgetPolicy,
                                   CashEntry, EntryKind as K, Goal, GoalContribution,
                                   calculate_month)
 from asset_copilot.budget.examples import SCENARIOS, sample_input
-from asset_copilot.web.forms import MAX_BODY, from_budget, form_from_values, to_budget
+from asset_copilot.web.forms import MAX_BODY, FormError, from_budget, form_from_values, to_budget
 
 web = import_module("asset_copilot.web.app")
 ORIGIN = {"Origin": "http://127.0.0.1:8765"}
@@ -43,6 +45,17 @@ def client():
 def submit(browser, values):
     token = browser.cookies.get("budget_csrf")
     return browser.post("/calculate", data={**values, "csrf_token": token}, headers=ORIGIN)
+
+
+def goal_input():
+    return BudgetInput(
+        date(2026, 9, 1), datetime(2026, 9, 25, 9, tzinfo=timezone.utc),
+        date(2026, 9, 25), Decimal("1000"), Decimal("0"), SOURCE, (),
+        (Goal("home", "HOME", Decimal("300"), date(2026, 9, 30),
+              Decimal("0"), 28, 1, SOURCE),),
+        BudgetPolicy(tuple(Allocation(category, Decimal("0"))
+                           for category in C if category is not C.GOAL), Decimal("0"), SOURCE),
+        True, True, protected_contributions_in_balance=())
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -282,6 +295,136 @@ def test_form_duplicate_fields_and_unknown_field_fail_closed():
         too_many_fields = submit(browser, values)
         assert too_many_fields.status_code == 422
         assert "Max number of fields exceeded" in too_many_fields.text
+
+
+def test_body_limit_stops_receiving_on_first_excess_chunk(monkeypatch):
+    monkeypatch.setattr(web, "MAX_BODY", 11)
+
+    async def post(chunks, length=None):
+        seen = []
+        async def stream():
+            for index, chunk in enumerate(chunks):
+                seen.append(index)
+                yield chunk
+        headers = {**ORIGIN, "Content-Type": "application/x-www-form-urlencoded"}
+        if length is not None:
+            headers["Content-Length"] = length
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app),
+                                     base_url="http://127.0.0.1:8765") as browser:
+            response = await browser.post("/calculate", content=stream(), headers=headers)
+        return response, seen
+
+    for length in (None, "11"):
+        exact, seen = asyncio.run(post([b"csrf", b"_token", b"="], length))
+        assert exact.status_code == 403
+        assert seen == [0, 1, 2]
+        below, seen = asyncio.run(post([b"csrf", b"_token"], length))
+        assert below.status_code == 403
+        assert seen == [0, 1]
+        excess, seen = asyncio.run(post([b"aaaa", b"bbbb", b"cccc", b"dddd"],
+                                        length if length is None else "8"))
+        assert excess.status_code == 413
+        assert seen == [0, 1, 2]  # fourth chunk was never requested
+        assert excess.headers["cache-control"].startswith("no-store")
+    declared_excess, seen = asyncio.run(post([b"unread"], "12"))
+    assert declared_excess.status_code == 413
+    assert seen == []
+    for malformed in ("", "nope", "+11", "9" * 100):
+        response, seen = asyncio.run(post([b"unread"], malformed))
+        assert response.status_code in (400, 413)
+        assert seen == []
+        assert response.headers["cache-control"].startswith("no-store")
+
+
+def test_complete_form_at_exact_body_limit(monkeypatch):
+    values = flatten(from_budget(sample_input("overspend"), ""))
+    with client() as browser:
+        browser.get("/")
+        payload = urlencode({**values, "csrf_token": browser.cookies.get("budget_csrf")}).encode()
+        monkeypatch.setattr(web, "MAX_BODY", len(payload))
+        exact = browser.post("/calculate", content=payload,
+                             headers={**ORIGIN, "Content-Type": "application/x-www-form-urlencoded"})
+        assert exact.status_code == 200
+        monkeypatch.setattr(web, "MAX_BODY", len(payload) - 1)
+        excess = browser.post("/calculate", content=payload,
+                              headers={**ORIGIN, "Content-Type": "application/x-www-form-urlencoded"})
+        assert excess.status_code == 413
+
+
+def test_invalid_csrf_and_origin_are_explicit_rejections_with_security_headers(monkeypatch):
+    values = flatten(from_budget(sample_input("overspend"), ""))
+    with client() as browser:
+        browser.get("/")
+        token = browser.cookies.get("budget_csrf")
+        changed = "A" if token[44] != "A" else "B"
+        for submitted in (token + "가", token[:44] + changed + token[45:]):
+            response = browser.post("/calculate", data={**values, "csrf_token": submitted},
+                                    headers=ORIGIN)
+            assert response.status_code == 403
+            assert response.headers["cache-control"].startswith("no-store")
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert "'self'" in response.headers["content-security-policy"]
+        assert submit(browser, values).status_code == 200
+        for origin in ("http://[", "null", "http://evil.example",
+                       "http://127.0.0.1:8765/", "http://127.0.0.1:8765/?x=1",
+                       "http://127.0.0.1:8765/#x", "https://127.0.0.1:8765"):
+            response = browser.post("/calculate", data={**values, "csrf_token": token},
+                                    headers={"Origin": origin})
+            assert response.status_code == 403
+            assert response.headers["cache-control"].startswith("no-store")
+            assert response.headers["x-frame-options"] == "DENY"
+        missing = browser.post("/calculate", data={**values, "csrf_token": token})
+        assert missing.status_code == 403
+        assert missing.headers["cache-control"].startswith("no-store")
+        monkeypatch.setattr(web, "_CSRF_SECRET", b"rotated-process-secret" * 2)
+        expired = browser.post("/calculate", data={**values, "csrf_token": token}, headers=ORIGIN)
+        assert expired.status_code == 403
+        assert expired.headers["cache-control"].startswith("no-store")
+
+
+def test_goal_allocation_unset_zero_and_positive_are_distinct_and_roundtrip():
+    base = goal_input()
+    form = from_budget(base, "")
+    assert form["goals"][0]["allocation_state"] == "unset"
+    assert to_budget(form) == base
+    unset = calculate_month(to_budget(form))
+    assert "allocation:GOAL:home" in unset.missing
+    assert not any(item.category is C.GOAL for item in to_budget(form).policy.allocations)
+
+    form["goals"][0]["allocation_state"] = "none"
+    zero = to_budget(form)
+    assert [item.amount for item in zero.policy.allocations if item.category is C.GOAL] == [Decimal("0")]
+    assert calculate_month(zero).goals[0].shortfall == Decimal("300")
+    assert "allocation:GOAL:home" not in calculate_month(zero).missing
+    assert from_budget(zero, "")["goals"][0]["allocation_state"] == "none"
+
+    form["goals"][0]["allocation_state"] = "amount"
+    form["goals"][0]["allocation_amount"] = "0"
+    assert to_budget(form) == zero
+    form["goals"][0]["allocation_amount"] = "100"
+    positive = to_budget(form)
+    assert calculate_month(positive).goals[0].shortfall == Decimal("200")
+    assert from_budget(positive, "")["goals"][0]["allocation_state"] == "amount"
+
+    form["goals"][0]["allocation_amount"] = ""
+    with pytest.raises(FormError):
+        to_budget(form)
+    form["goals"][0]["allocation_state"] = "unset"
+    form["goals"][0]["allocation_amount"] = "0"
+    with pytest.raises(FormError):
+        to_budget(form)
+
+    no_policy = replace(base, policy=None)
+    assert from_budget(no_policy, "")["goals"][0]["allocation_state"] == "unset"
+    assert to_budget(from_budget(no_policy, "")) == no_policy
+    no_policy_form = from_budget(no_policy, "")
+    no_policy_form["goals"][0]["allocation_state"] = "none"
+    with pytest.raises(FormError):
+        to_budget(no_policy_form)
+    unknown = replace(base, goals=(replace(base.goals[0], target_amount=None, deadline=None),))
+    converted_unknown = to_budget(from_budget(unknown, ""))
+    assert converted_unknown.goals[0].target_amount is None
+    assert converted_unknown.goals[0].deadline is None
 
 
 def test_core_form_conversion_requires_explicit_zero_and_preserves_time():

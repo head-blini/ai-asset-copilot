@@ -52,7 +52,7 @@
     {{ field('goal.' ~ i ~ '.saved_amount','현재까지 적립액 · 원',row.get('saved_amount',''),maxlength=32) }}
     {{ field('goal.' ~ i ~ '.contribution_day','매월 납입일 · 1~28',row.get('contribution_day',''),maxlength=2) }}
     {{ field('goal.' ~ i ~ '.priority','우선순위 · 1부터',row.get('priority',''),maxlength=3) }}
-    {{ choice('goal.' ~ i ~ '.allocation_state','이번 달 목표 배정',row.get('allocation_state',''),[('none','배정 없음'),('amount','금액 입력')]) }}
+    {{ choice('goal.' ~ i ~ '.allocation_state','이번 달 목표 배정',row.get('allocation_state',''),[('unset','아직 정하지 않음'),('none','배정 없음 · 0원'),('amount','금액 입력')]) }}
     {{ field('goal.' ~ i ~ '.allocation_amount','목표 배정액 · 원',row.get('allocation_amount',''),maxlength=32) }}
     {{ field('goal.' ~ i ~ '.allocation_reserved','현재 예약액 · 원',row.get('allocation_reserved',''),maxlength=32) }}
     {{ field('goal.' ~ i ~ '.source','자료 출처',row.get('source','manual-local-web')) }}

@@ -129,9 +129,13 @@ async def local_boundary(request: Request, call_next):
 
 def _same_origin(request: Request, host: str) -> bool:
     origin = request.headers.get("origin", "")
-    parsed = urlsplit(origin)
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
     return parsed.scheme == "http" and parsed.netloc.lower() == host.lower() \
-        and not parsed.username and not parsed.password and not parsed.path
+        and not parsed.username and not parsed.password and not parsed.path \
+        and not parsed.query and not parsed.fragment
 
 
 def _token(request: Request) -> tuple[str, bool]:
@@ -196,12 +200,18 @@ async def calculate(request: Request):
     if request.headers.get("content-type", "").split(";", 1)[0].lower() != \
             "application/x-www-form-urlencoded":
         return PlainTextResponse("HTML 폼 전송만 허용합니다.", status_code=415)
-    declared = request.headers.get("content-length", "")
-    if declared and (not declared.isdecimal() or int(declared) > MAX_BODY):
-        return PlainTextResponse("입력 본문 크기 제한을 초과했습니다.", status_code=413)
-    body = await request.body()
-    if len(body) > MAX_BODY:
-        return PlainTextResponse("입력 본문 크기 제한을 초과했습니다.", status_code=413)
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        if not re.fullmatch(r"[0-9]+", declared):
+            return PlainTextResponse("Content-Length 형식이 잘못됐습니다.", status_code=400)
+        significant = declared.lstrip("0") or "0"
+        if len(significant) > len(str(MAX_BODY)) or int(significant) > MAX_BODY:
+            return PlainTextResponse("입력 본문 크기 제한을 초과했습니다.", status_code=413)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(chunk) > MAX_BODY - len(body):
+            return PlainTextResponse("입력 본문 크기 제한을 초과했습니다.", status_code=413)
+        body.extend(chunk)
     try:
         pairs = parse_qsl(body.decode("utf-8", errors="strict"), keep_blank_values=True,
                           max_num_fields=MAX_FIELDS, errors="strict")
@@ -212,7 +222,8 @@ async def calculate(request: Request):
             raise FormError("form", "필드 길이 제한을 초과했습니다.")
         cookie = request.cookies.get("budget_csrf", "")
         submitted = values.get("csrf_token", "")
-        if not _valid_token(cookie) or not submitted or not secrets.compare_digest(cookie, submitted):
+        if not _valid_token(cookie) or not _valid_token(submitted) or \
+                not secrets.compare_digest(cookie, submitted):
             return PlainTextResponse("CSRF 확인에 실패했습니다.", status_code=403)
         form = form_from_values(values)
         if form["example_id"] and form["example_id"] not in SCENARIOS:

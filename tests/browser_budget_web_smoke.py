@@ -50,6 +50,57 @@ def compact(text):
     return re.sub(r"\s+", "", text)
 
 
+def goal_selection_path(page):
+    fill_direct(page)
+    page.locator('[name="goals_mode"]').select_option("rows")
+    page.locator("details.detail-panel").nth(1).locator("summary").click()
+    page.locator('.add-row[data-kind="goal"]').click()
+    for name, value in {
+        "id": "home", "target_amount": "300", "deadline": "2026-09-30",
+        "saved_amount": "0", "contribution_day": "28", "priority": "1",
+    }.items():
+        page.locator(f'[name="goal.0.{name}"]').fill(value)
+    page.locator('[name="goal.0.kind"]').select_option("HOME")
+    state = page.locator('[name="goal.0.allocation_state"]')
+    state.select_option("unset")
+    calculate(page)
+    assert "목표home의이번달배정확인필요" in compact(page.locator("#result").inner_text())
+    assert state.input_value() == "unset"
+
+    state.select_option("none")
+    assert page.locator("#result").count() == 0
+    calculate(page)
+    assert "목표home의이번달배정확인필요" not in compact(page.locator("#result").inner_text())
+    allocation_row = page.locator("#result table").first.locator("tr").filter(has_text="home")
+    assert allocation_row.locator("td").first.inner_text() == "0"
+    zero_goal = page.locator(".goal-results article").first.inner_text()
+    zero_metrics = page.locator(".metrics").inner_text()
+
+    state.select_option("amount")
+    page.locator('[name="goal.0.allocation_amount"]').fill("0")
+    calculate(page)
+    assert page.locator(".goal-results article").first.inner_text() == zero_goal
+    assert page.locator(".metrics").inner_text() == zero_metrics
+    assert allocation_row.locator("td").first.inner_text() == "0"
+
+    page.locator('[name="goal.0.allocation_amount"]').fill("100")
+    assert page.locator("#result").count() == 0
+    calculate(page)
+    assert allocation_row.locator("td").first.inner_text() == "100"
+    assert "200" in page.locator(".goal-results article").first.inner_text()
+
+    page.locator('[name="goal.0.allocation_amount"]').fill("")
+    assert page.locator("#result").count() == 0
+    page.get_by_role("button", name="월간 예산 계산").click()
+    page.wait_for_load_state("networkidle")
+    assert page.locator("#form-error").count() == 1
+    assert page.locator("#result").count() == 0
+    assert state.input_value() == "amount"
+    assert page.locator('[name="goal.0.allocation_amount"]').input_value() == ""
+    page.locator('[name="goal.0.allocation_amount"]').fill("100")
+    calculate(page)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
@@ -78,6 +129,7 @@ def main():
         assert desktop.locator('[name="cash_balance"]').input_value() == "bad"
         desktop.locator('[name="cash_balance"]').fill("800")
         calculate(desktop)
+        goal_selection_path(desktop)
         desktop.once("dialog", lambda dialog: dialog.accept())
         desktop.locator('.example-link[href="/examples/normal"]').click()
         desktop.wait_for_load_state("networkidle")
@@ -95,14 +147,19 @@ def main():
         fill_direct(mobile)
         calculate(mobile)
         assert "현재배정여력300원" in compact(mobile.locator(".metrics").inner_text())
+        mobile.locator('[name="cash_balance"]').fill("800")
+        assert mobile.locator("#result").count() == 0
+        calculate(mobile)
+        assert "현재배정여력100원" in compact(mobile.locator(".metrics").inner_text())
+        goal_selection_path(mobile)
         mobile.goto(URL + "examples/overspend")
         calculate(mobile)
         mobile.screenshot(path=str(OUT / "budget-web-mobile.png"), full_page=True)
         mobile.goto(URL + "examples/normal")
         calculate(mobile)
         browser.close()
-    print("Chromium desktop 1440px: direct input, calculation, edit and recalculation passed")
-    print("Chromium mobile 390px: direct input, calculation and horizontal layout passed")
+    print("Chromium desktop 1440px: direct input, edit, goal states and recalculation passed")
+    print("Chromium mobile 390px: direct input, edit, goal states and recalculation passed")
     print("Screenshots:", OUT / "budget-web-desktop.png", OUT / "budget-web-mobile.png")
 
 

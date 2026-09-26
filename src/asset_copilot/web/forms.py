@@ -240,17 +240,21 @@ def to_budget(form: dict) -> BudgetInput:
                 _text(row.get("source", ""), field + ".source", required=True),
                 tuple(contributions.pop(goal_id, []))))
             state = _choice(row.get("allocation_state", ""), field + ".allocation_state",
-                            ("none", "amount")) if policy_mode == "rows" else \
-                _choice(row.get("allocation_state", ""), field + ".allocation_state",
-                        ("", "none", "amount"))
+                            ("unset", "none", "amount") if policy_mode == "rows"
+                            else ("", "unset"))
             if state == "amount":
                 goal_allocations.append(Allocation(
                     BudgetCategory.GOAL, _money(row.get("allocation_amount", ""),
                                                 field + ".allocation_amount"), goal_id,
                     _money(row.get("allocation_reserved", ""),
                            field + ".allocation_reserved", optional=True) or Decimal("0")))
-            elif state == "none" and (row.get("allocation_amount") or row.get("allocation_reserved")):
-                raise FormError(field + ".allocation_state", "배정 없음과 금액을 함께 입력할 수 없습니다.")
+            else:
+                if row.get("allocation_amount") or row.get("allocation_reserved"):
+                    raise FormError(field + ".allocation_state",
+                                    "미설정·배정 없음과 금액을 함께 입력할 수 없습니다.")
+                if state == "none":
+                    goal_allocations.append(Allocation(BudgetCategory.GOAL,
+                                                       Decimal("0"), goal_id))
         if contributions:
             raise FormError("contributions", "존재하지 않는 목표에 연결된 납입이 있습니다.")
         if policy_mode == "none":
@@ -323,14 +327,24 @@ def from_budget(data: BudgetInput, example_id: str) -> dict:
     included = set(data.protected_contributions_in_balance or ())
     for goal in data.goals:
         allocation = allocation_by_goal.get(goal.id)
+        if allocation is None:
+            allocation_state = "unset"
+            allocation_amount = allocation_reserved = ""
+        elif allocation.amount == 0 and allocation.reserved == 0:
+            allocation_state = "none"
+            allocation_amount = allocation_reserved = ""
+        else:
+            allocation_state = "amount"
+            allocation_amount = str(allocation.amount)
+            allocation_reserved = str(allocation.reserved)
         form["goals"].append({
             "id": goal.id, "kind": goal.kind, "target_amount": "" if goal.target_amount is None
             else str(goal.target_amount), "deadline": goal.deadline.isoformat() if goal.deadline else "",
             "saved_amount": str(goal.saved_amount), "contribution_day": str(goal.contribution_day),
             "priority": str(goal.priority), "source": goal.source,
-            "allocation_state": "amount" if allocation else "none",
-            "allocation_amount": str(allocation.amount) if allocation else "",
-            "allocation_reserved": str(allocation.reserved) if allocation else ""})
+            "allocation_state": allocation_state,
+            "allocation_amount": allocation_amount,
+            "allocation_reserved": allocation_reserved})
         for contribution in goal.contributions:
             form["contributions"].append({
                 "goal_id": goal.id, "day": contribution.day.isoformat(),
