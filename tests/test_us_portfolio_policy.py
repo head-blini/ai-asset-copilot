@@ -97,6 +97,14 @@ def complete_analysis(*, core="50", growth="15", stocks="25", cash="10"):
                    sector_classified_market_value=stocks)
 
 
+def two_stock_analysis():
+    """Split the reconciled 25 USD STOCK exposure without changing other facts."""
+    data = complete_analysis()
+    stocks = (position("stock-a", "12.5", "100"),
+              position("stock-b", "12.5", "100"))
+    return replace(data, positions=data.positions[:2] + stocks)
+
+
 def complete_classifications(data):
     return tuple(ETFClassification(item.asset_id,
                  ETFGroup.CORE if item.asset_id == "core" else ETFGroup.GROWTH)
@@ -803,6 +811,42 @@ def test_extra_malformed_position_cannot_be_filtered_into_allocation_pass(damage
     assert {item.reason_code for item in report.allocation_evaluations} == {
         PolicyReason.INVALID_ANALYSIS}
     assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.UNKNOWN
+
+
+def test_two_valid_stock_ids_preserve_reconciled_risk_and_allocation_in_any_order():
+    data = two_stock_analysis()
+    classes = complete_classifications(data)
+    engine = PortfolioPolicyEngine(config())
+    report = engine.evaluate(data, etf_classifications=classes)
+    assert {item.status for item in report.evaluations} == {PolicyStatus.PASS}
+    assert {item.status for item in report.allocation_evaluations} == {PolicyStatus.PASS}
+    assert {item.target.identifier for item in report.evaluations
+            if item.policy is PolicyKind.INDIVIDUAL_STOCK} == {"stock-a", "stock-b"}
+    assert allocation(report, AllocationBucket.INDIVIDUAL_STOCKS).market_value_usd == D("25")
+    assert engine.evaluate(replace(data, positions=tuple(reversed(data.positions))),
+                           etf_classifications=tuple(reversed(classes))) == report
+
+
+@pytest.mark.parametrize("bad_id", [None, 7, ["stock-b"], "", "   "])
+def test_malformed_stock_asset_id_is_unknown_in_any_order_without_partial_pass(bad_id):
+    data = two_stock_analysis()
+    damaged_stock = replace(data.positions[-1], asset_id=bad_id)
+    data = replace(data, positions=data.positions[:-1] + (damaged_stock,))
+    classes = complete_classifications(data)
+    engine = PortfolioPolicyEngine(config())
+    reports = [engine.evaluate(replace(data, positions=positions),
+                               etf_classifications=classes)
+               for positions in (data.positions, tuple(reversed(data.positions)))]
+    assert reports[0] == reports[1]
+    for report in reports:
+        assert {item.status for item in report.evaluations} == {PolicyStatus.UNKNOWN}
+        assert {item.reason_code for item in report.evaluations} == {
+            PolicyReason.UNRELIABLE_ANALYSIS}
+        assert {item.status for item in report.allocation_evaluations} == {
+            PolicyStatus.UNKNOWN}
+        assert {item.reason_code for item in report.allocation_evaluations} == {
+            PolicyReason.INVALID_ANALYSIS}
+        assert PolicyKind.INDIVIDUAL_STOCK not in report.not_applicable
 
 
 @pytest.mark.parametrize("damaged", [None, object()])

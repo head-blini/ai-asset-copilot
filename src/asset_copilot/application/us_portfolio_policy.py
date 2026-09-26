@@ -239,15 +239,25 @@ class PortfolioPolicyEngine:
         evaluations: list[PolicyEvaluation] = []
         not_applicable: list[PolicyKind] = []
 
-        stocks = sorted((item for item in valid_positions if item.asset_type is AssetType.STOCK),
-                        key=lambda item: item.asset_id)
+        # A malformed identity cannot be used as a sort key or as an asset
+        # target. Keep the whole stock decision UNKNOWN rather than evaluating
+        # only the remaining well-formed positions.
+        if position_shape_ok:
+            stocks = sorted((item for item in valid_positions if item.asset_type is AssetType.STOCK),
+                            key=lambda item: item.asset_id)
+        else:
+            stocks = []
+            evaluations.append(_unknown(
+                PolicyKind.INDIVIDUAL_STOCK, PolicyTarget(PolicyTargetKind.ASSET),
+                None, stock_limits, PolicyReason.UNRELIABLE_ANALYSIS,
+                "Analysis evidence is unsuitable for policy evaluation"))
         if stocks:
             for position in stocks:
                 evaluations.append(_concentration(
                     PolicyKind.INDIVIDUAL_STOCK, PolicyTarget(PolicyTargetKind.ASSET, position.asset_id),
                     position.market_value, position.weight, total, stock_limits, reliable,
                 ))
-        else:
+        elif position_shape_ok:
             not_applicable.append(PolicyKind.INDIVIDUAL_STOCK)
 
         # stock_exposure is the Phase 3 ratio/availability signal. Sum the exact
