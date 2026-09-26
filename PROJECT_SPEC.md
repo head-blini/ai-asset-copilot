@@ -53,7 +53,7 @@ Portfolio Policy는 **인간이 정한 장기 전략 정책**이다. AI는 Polic
 | Sector 최대 비중 | 35% |
 | 전체 Individual Stocks 최대 비중 | 30% |
 
-초기 값은 `config/us_portfolio_policy.toml`에 선언한다. 비율 단위는 percentage points로, `50`은 50%를 뜻한다. Phase 4 loader가 이 설정을 읽고 검증하며 수치를 Business Logic에 hard coding하지 않는다. 정책 요구사항과 초기 설정 값은 함께 검토·변경한다. 이번 candidate 평가기는 개별 STOCK 한도, 전체 STOCK 한도, 직접 STOCK Sector, Cash Range를 다룬다. Core/Growth ETF 분류와 전체 Target/Range 평가의 누락은 Phase 4 미완료 항목이다. 이를 후속 Phase로 이관한 결정은 없다.
+초기 값은 `config/us_portfolio_policy.toml`에 선언한다. 비율 단위는 percentage points로, `50`은 50%를 뜻한다. Phase 4 loader가 이 설정을 읽고 검증하며 수치를 Business Logic에 hard coding하지 않는다. 정책 요구사항과 초기 설정 값은 함께 검토·변경한다. 이번 P4-05 후보 평가기는 개별 STOCK 한도, 전체 STOCK 한도, 직접 STOCK Sector, Cash Range에 더해 명시적 ETF 분류에 따른 네 자산군 Target/Range를 반환한다. 이는 검토 중인 기능이며 Policy 승인·이력 및 Phase 4 전체 완료를 뜻하지 않는다.
 
 설정 파일에 쓰인 version은 추적용 식별자다. 파일만으로 수정 권한이 강제되지는 않는다. 향후 AI의 쓰기 권한을 차단하고, 인간의 승인·정책 버전·적용 시점·변경 이력을 보존해야 한다. 과거 판단과 시뮬레이션에는 당시 정책 버전을 연결한다.
 
@@ -206,7 +206,7 @@ Broker의 향후 인터페이스 개념은 `get_accounts`, `get_balance`, `get_p
 | ID | 미결정 사항 | 결정 시점 |
 | --- | --- | --- |
 | OD-01 | Phase 1 확정: Decimal만 사용, 중간 통화 반올림 없음, 이동 가중평균 원가, 매수 수수료 원가 포함·매도 수수료 실현손익 차감, 불투명 문자열 ID, 시간대가 있는 금융 이벤트 시각과 계좌별 기록 sequence. Phase 3 현재 분석에는 명시적 `evaluated_at`과 개별 quote `as_of`를 보존한다. 미결정: 표시·Broker·세금 반올림, 역사적 성과용 FX·가격 시점 기준, 추가 기업행사 | Phase 1·3 일부 확정; 나머지는 해당 Phase에서 결정 |
-| OD-02 | Phase 4 candidate 평가 계약: individual_position_max는 STOCK만, 전체 STOCK 한도 포함, 직접 분류 STOCK Sector, 현금 포함 총가치 분모, concentration 경고·위반은 한도 이상, Cash Range는 양 끝 포함. 미결정: Core/Growth ETF 분류, ETF look-through, 전체 Target/Range 적용, 리밸런싱 트리거·거래 우선순위, 위반 상태 복구, 인간 Policy 변경 승인·버전 적용 방식 | Phase 4 IN REVIEW; 범위·변경 이력·권한은 Phase 4 완료 전, Shadow 실행의 선행 조건 |
+| OD-02 | Phase 4 후보 평가 계약: individual_position_max는 STOCK만, 전체 STOCK 한도 포함, 직접 분류 STOCK Sector, 현금 포함 총가치 분모, concentration 경고·위반은 한도 이상. P4-05 후보는 ETF를 asset_id로 명시적 Core/Growth 분류하고 네 Target/Range를 양 끝 포함으로 평가하며 독립 Risk 결과를 유지한다. 미결정: ETF look-through, 리밸런싱 트리거·거래 우선순위, 위반 상태 복구, 인간 Policy 변경 승인·버전 적용 방식 | Phase 4 IN REVIEW; P4-05 검토와 변경 이력·권한은 Phase 4 완료 전, Shadow 실행의 선행 조건 |
 | OD-03 | Benchmark 자산, 초기 자본·입출금 대응, 배당 재투자, TWR/MWR 등 수익률 기준, 비교 통화·기간·체결 가정, Sharpe 무위험 수익률·연율화, 집중도 정의 | Phase 3–5 |
 | OD-04 | Phase 2 확정: 첫 Market Data adapter는 Twelve Data, 내부 계약은 provider-neutral, 가격·FX quote의 출처·통화·시점 및 오류 경계 정의. 미결정: 데이터 라이선스·지연·수정주가·상장폐지 종목·point-in-time coverage의 투자용 적합성, 투자용 freshness threshold, AI Provider·모델과 개인정보 전송 범위 | Market Data 일부 Phase 2 확정; 투자 사용 전 데이터 검증, AI: Phase 7 |
 | OD-05 | 한국 시장 Commission·Tax·Slippage, 체결·호가·유동성·Partial Fill 모델, Market Hours, 결제·가용 현금 규칙, Position/Daily Loss Limit 수치·기준 | Phase 8; Phase 9–10 전에 검증 |
@@ -285,4 +285,6 @@ Concentration은 `실제 평가액 >= breach_ratio × 총가치`이면 `BREACH`,
 
 Phase 3는 stale/미상 가격 또는 FX를 거부해 `PortfolioAnalysis`를 만들지 않는다. 신선도 통과 플래그가 거짓인 분석이 전달되면 정책은 `UNKNOWN`으로 표시하고 `PASS`로 대체하지 않는다. 총가치 0이면 Cash Ratio와 전체 STOCK 비율은 `UNKNOWN`이다. 대상 STOCK·직접 Sector가 없으면 해당 개별 정책은 `not_applicable`에 나타난다. 양의 현금만 있거나 ETF만 있는 계좌도 전체 STOCK 비율 0은 평가하지만, 개별 STOCK·Sector는 미적용이다. ETF 미적용을 Core/Growth allocation PASS로 해석하지 않는다. `UNKNOWN`과 미적용은 서로 다른 의미다. 정책 설정 TOML은 percentage points에서 Decimal ratio로 변환해 합계·범위·한도를 검증한다. root, target_percent, range_percent, 각 range, risk_percent의 키를 명시하고 unknown/missing key·잘못된 타입·비유한 값은 ValueError로 거부한다. sector_warning만 명시적 선택 항목이며 없으면 경고 구간을 만들지 않는다. policy_version은 schema 선택자가 아닌 추적용 식별자다. 유효한 allocation 설정을 검증하는 것과 그 범위를 실제 평가하는 것은 구분한다. 실제 운영용 quote/FX freshness 한도, 정책 승인·변경 이력·적용 시점은 여전히 별도 결정 사항이다.
 
-Phase 4 완료 여부는 docs/ROADMAP.md의 P4-01~P4-09와 docs/STATUS.md의 검증 증거를 따른다. 기존 candidate의 완료 선언은 철회되었으며 정책 변경 이력·권한·적용 시점과 전체 allocation 평가는 현재 OPEN이다.
+P4-05 후보는 설정의 Core ETF·Growth ETF·Individual Stocks·Cash target/min/max를 불변 평가 입력에 보존한다. ETF 분류는 `ETFClassification(asset_id, group)` 입력이며 ticker나 이름으로 추측하지 않는다. 중복·충돌·존재하지 않는 asset_id, STOCK의 ETF 분류는 거부한다. 현금을 포함한 총 USD 평가액을 분모로 각 자산군의 평가액·실제 비율·목표·양 끝 포함 범위·목표 편차와 판정 이유를 독립적으로 반환한다. 목표 편차만으로 경고나 주문을 만들지 않으며, 별도 concentration Risk BREACH를 배분 PASS로 덮지 않는다. 중복 position, 누락·잘못된 타입, 현금·포지션·ETF·업종 금액 불일치, 0 총가치, 미분류 ETF나 신뢰할 수 없는 분석에는 해당 배분 판정을 `UNKNOWN`과 이유로 나타낸다. 전체 적합·승인 판정은 제공하지 않는다.
+
+Phase 4 완료 여부는 docs/ROADMAP.md의 P4-01~P4-09와 docs/STATUS.md의 검증 증거를 따른다. 기존 candidate의 완료 선언은 철회되었다. P4-05는 별도 후보 검토 중이며 정책 변경 이력·권한·적용 시점(P4-06/07)과 최종 검토·main 병합(P4-09)은 OPEN이다.

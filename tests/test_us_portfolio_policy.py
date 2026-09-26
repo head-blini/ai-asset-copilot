@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from examples.p4_allocation_offline import run_example
 from asset_copilot.application.policy_config import load_portfolio_policy_config
 from asset_copilot.application.us_portfolio_analytics import (
     AnalysisError, DirectSectorExposure, PortfolioAnalysis, PositionAnalysis,
@@ -18,8 +19,8 @@ from asset_copilot.domain.models import (
     Account, AccountType, Asset, AssetType, Currency, Portfolio, Transaction, TransactionType,
 )
 from asset_copilot.domain.policy import (
-    CashRangeThresholds, PolicyKind, PolicyReason, PolicyStatus, PolicyTargetKind,
-    PortfolioPolicyConfig,
+    AllocationBand, AllocationBucket, CashRangeThresholds, ETFClassification, ETFGroup,
+    PolicyKind, PolicyReason, PolicyStatus, PolicyTargetKind, PortfolioPolicyConfig,
 )
 from asset_copilot.market.models import FxQuote, MarketQuote
 from asset_copilot.portfolio.calculator import _add, _div
@@ -29,6 +30,7 @@ from asset_copilot.storage.sqlite import SQLiteStore
 D = Decimal
 NOW = datetime(2026, 9, 22, 15, tzinfo=timezone.utc)
 CONFIG_FILE = Path(__file__).resolve().parents[1] / "config/us_portfolio_policy.toml"
+BASE_BANDS = load_portfolio_policy_config(CONFIG_FILE).allocation_bands
 
 
 def config(**changes):
@@ -37,6 +39,10 @@ def config(**changes):
                   direct_sector_breach_ratio=D("0.40"), min_cash_ratio=D("0.05"),
                   max_cash_ratio=D("0.30"), individual_stocks_total_max_ratio=D("0.80"))
     values.update(changes)
+    if "allocation_bands" not in changes:
+        values["allocation_bands"] = tuple(
+            replace(band, min_ratio=values["min_cash_ratio"], max_ratio=values["max_cash_ratio"])
+            if band.bucket is AllocationBucket.CASH else band for band in BASE_BANDS)
     return PortfolioPolicyConfig(**values)
 
 
@@ -69,6 +75,46 @@ def analysis(*, total="100", cash="20", positions=(), sectors=(), unclassified="
         total_value_krw=total * D("1300"), fx_source="fixture", fx_as_of=NOW,
         fx_fetched_at=NOW,
     )
+
+
+def complete_analysis(*, core="50", growth="15", stocks="25", cash="10"):
+    """Reconciled allocation evidence, unlike the focused risk fixtures above."""
+    core, growth, stocks, cash = map(D, (core, growth, stocks, cash))
+    total = _add(_add(core, growth), _add(stocks, cash))
+    items = tuple(
+        position(asset_id, str(value), str(total), kind=kind)
+        for asset_id, value, kind in (
+            ("core", core, AssetType.ETF),
+            ("growth", growth, AssetType.ETF),
+            ("stock", stocks, AssetType.STOCK),
+        ) if value > 0)
+    sectors = ((DirectSectorExposure("Technology", stocks, _div(stocks, total)),)
+               if stocks > 0 else ())
+    data = analysis(total=str(total), cash=str(cash), positions=items, sectors=sectors)
+    etf_value = _add(core, growth)
+    return replace(data, etf_market_value=etf_value,
+                   etf_exposure=_div(etf_value, total) if total else None,
+                   sector_classified_market_value=stocks)
+
+
+def two_stock_analysis():
+    """Split the reconciled 25 USD STOCK exposure without changing other facts."""
+    data = complete_analysis()
+    stocks = (position("stock-a", "12.5", "100"),
+              position("stock-b", "12.5", "100"))
+    return replace(data, positions=data.positions[:2] + stocks)
+
+
+def complete_classifications(data):
+    return tuple(ETFClassification(item.asset_id,
+                 ETFGroup.CORE if item.asset_id == "core" else ETFGroup.GROWTH)
+                 for item in data.positions if item.asset_type is AssetType.ETF)
+
+
+def allocation(report, bucket):
+    matches = [item for item in report.allocation_evaluations if item.bucket is bucket]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def decision(report, policy, target_kind=None, identifier=None):
@@ -559,3 +605,312 @@ def test_stale_quote_is_rejected_before_policy_analysis_exists(tmp_path):
             analyzer.analyze("account", evaluated_at=NOW,
                              max_quote_age=timedelta(minutes=1),
                              max_fx_age=timedelta(minutes=1))
+
+
+def test_loader_preserves_every_declared_allocation_target_and_range():
+    configured = load_portfolio_policy_config(CONFIG_FILE)
+    assert configured.allocation_bands == (
+        AllocationBand(AllocationBucket.CORE_ETF, D("0.50"), D("0.40"), D("0.60")),
+        AllocationBand(AllocationBucket.GROWTH_ETF, D("0.15"), D("0.10"), D("0.20")),
+        AllocationBand(AllocationBucket.INDIVIDUAL_STOCKS, D("0.25"), D("0.15"), D("0.30")),
+        AllocationBand(AllocationBucket.CASH, D("0.10"), D("0.05"), D("0.20")),
+    )
+
+
+@pytest.mark.parametrize("bands", [
+    BASE_BANDS[:-1],
+    BASE_BANDS[:-1] + (BASE_BANDS[0],),
+    BASE_BANDS[:1] + (replace(BASE_BANDS[1], target_ratio=D("0.16")),) + BASE_BANDS[2:],
+])
+def test_direct_config_rejects_missing_duplicate_or_inconsistent_allocation(bands):
+    with pytest.raises(ValueError):
+        config(allocation_bands=bands)
+
+
+def test_allocation_band_rejects_target_outside_range():
+    with pytest.raises(ValueError, match="inclusive range"):
+        replace(BASE_BANDS[1], min_ratio=D("0.16"))
+
+
+def test_four_bucket_values_targets_and_risk_results_are_independent():
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(load_portfolio_policy_config(CONFIG_FILE)).evaluate(
+        data, etf_classifications=complete_classifications(data))
+    assert [(item.bucket, item.market_value_usd, item.actual_ratio,
+             item.target_ratio, item.target_delta_ratio, item.status)
+            for item in report.allocation_evaluations] == [
+        (AllocationBucket.CORE_ETF, D("50"), D("0.5"), D("0.5"), D("0"), PolicyStatus.PASS),
+        (AllocationBucket.GROWTH_ETF, D("15"), D("0.15"), D("0.15"), D("0"), PolicyStatus.PASS),
+        (AllocationBucket.INDIVIDUAL_STOCKS, D("25"), D("0.25"), D("0.25"), D("0"), PolicyStatus.PASS),
+        (AllocationBucket.CASH, D("10"), D("0.1"), D("0.1"), D("0"), PolicyStatus.PASS),
+    ]
+    assert sum((item.market_value_usd for item in report.allocation_evaluations), D("0")) == data.total_value_usd
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.PASS
+    assert decision(report, PolicyKind.INDIVIDUAL_STOCK).status is PolicyStatus.BREACH
+    assert not any(item.target.identifier in ("core", "growth")
+                   for item in report.evaluations)
+
+
+def test_same_ticker_different_asset_ids_keep_distinct_etf_groups():
+    data = complete_analysis()
+    positions = tuple(replace(item, ticker="SHARED") if item.asset_type is AssetType.ETF
+                      else item for item in data.positions)
+    report = PortfolioPolicyEngine(load_portfolio_policy_config(CONFIG_FILE)).evaluate(
+        replace(data, positions=positions),
+        etf_classifications=(ETFClassification("growth", ETFGroup.GROWTH),
+                             ETFClassification("core", ETFGroup.CORE)))
+    assert allocation(report, AllocationBucket.CORE_ETF).market_value_usd == D("50")
+    assert allocation(report, AllocationBucket.GROWTH_ETF).market_value_usd == D("15")
+
+
+@pytest.mark.parametrize("entries,error", [
+    ((ETFClassification("core", ETFGroup.CORE), ETFClassification("core", ETFGroup.CORE)),
+     "duplicate or conflicting"),
+    ((ETFClassification("core", ETFGroup.CORE), ETFClassification("core", ETFGroup.GROWTH)),
+     "duplicate or conflicting"),
+    ((ETFClassification("stock", ETFGroup.CORE),), "not an ETF"),
+    ((ETFClassification("absent", ETFGroup.CORE),), "absent"),
+])
+def test_duplicate_conflicting_stock_and_unknown_classification_are_rejected(entries, error):
+    with pytest.raises(ValueError, match=error):
+        PortfolioPolicyEngine(config()).evaluate(complete_analysis(), etf_classifications=entries)
+
+
+def test_invalid_classification_values_are_rejected():
+    with pytest.raises(ValueError, match="CORE or GROWTH"):
+        ETFClassification("core", "CORE")
+    with pytest.raises(ValueError, match="asset_id"):
+        ETFClassification("", ETFGroup.CORE)
+    with pytest.raises(TypeError, match="ETFClassification"):
+        PortfolioPolicyEngine(config()).evaluate(complete_analysis(), etf_classifications=("core",))
+
+
+def test_missing_etf_classification_is_unknown_without_hiding_known_buckets():
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(config()).evaluate(
+        data, etf_classifications=(ETFClassification("core", ETFGroup.CORE),))
+    for bucket in (AllocationBucket.CORE_ETF, AllocationBucket.GROWTH_ETF):
+        item = allocation(report, bucket)
+        assert item.status is PolicyStatus.UNKNOWN
+        assert item.reason_code is PolicyReason.UNCLASSIFIED_ETF
+        assert "growth" in item.reason
+        assert item.actual_ratio is None
+    assert allocation(report, AllocationBucket.INDIVIDUAL_STOCKS).actual_ratio == D("0.25")
+    assert allocation(report, AllocationBucket.CASH).actual_ratio == D("0.1")
+
+
+def test_focused_risk_fixture_is_not_treated_as_complete_allocation_evidence():
+    data = analysis(cash="20", positions=(position("stock", "10", "100"),))
+    report = PortfolioPolicyEngine(config()).evaluate(data)
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.PASS
+    assert {item.reason_code for item in report.allocation_evaluations} == {
+        PolicyReason.INVALID_EXPOSURE}
+
+
+@pytest.mark.parametrize("bucket", list(AllocationBucket))
+@pytest.mark.parametrize("edge,offset,expected", [
+    ("min_ratio", D("0"), PolicyStatus.PASS),
+    ("max_ratio", D("0"), PolicyStatus.PASS),
+    ("min_ratio", D("-0.000001"), PolicyStatus.BREACH),
+    ("max_ratio", D("0.000001"), PolicyStatus.BREACH),
+])
+def test_all_four_allocation_ranges_have_inclusive_exact_edges(bucket, edge, offset, expected):
+    band = next(item for item in BASE_BANDS if item.bucket is bucket)
+    values = {
+        AllocationBucket.CORE_ETF: D("50"), AllocationBucket.GROWTH_ETF: D("15"),
+        AllocationBucket.INDIVIDUAL_STOCKS: D("25"), AllocationBucket.CASH: D("10"),
+    }
+    value = getattr(band, edge) * D("100") + offset
+    balancing = (AllocationBucket.INDIVIDUAL_STOCKS if bucket is AllocationBucket.CORE_ETF
+                 else AllocationBucket.CORE_ETF)
+    values[balancing] += values[bucket] - value
+    values[bucket] = value
+    data = complete_analysis(core=str(values[AllocationBucket.CORE_ETF]),
+                             growth=str(values[AllocationBucket.GROWTH_ETF]),
+                             stocks=str(values[AllocationBucket.INDIVIDUAL_STOCKS]),
+                             cash=str(values[AllocationBucket.CASH]))
+    result = PortfolioPolicyEngine(load_portfolio_policy_config(CONFIG_FILE)).evaluate(
+        data, etf_classifications=complete_classifications(data))
+    item = allocation(result, bucket)
+    assert (item.status, item.actual_ratio) == (expected, _div(value, D("100")))
+    assert item.reason_code is (PolicyReason.BELOW_MINIMUM if offset < 0 else
+                                PolicyReason.ABOVE_MAXIMUM if offset > 0 else
+                                PolicyReason.WITHIN_RANGE)
+
+
+def test_target_deviation_does_not_create_warning_or_override_range_and_risk():
+    data = complete_analysis(core="55", growth="15", stocks="20", cash="10")
+    report = PortfolioPolicyEngine(load_portfolio_policy_config(CONFIG_FILE)).evaluate(
+        data, etf_classifications=complete_classifications(data))
+    core = allocation(report, AllocationBucket.CORE_ETF)
+    assert (core.status, core.reason_code, core.target_delta_ratio) == (
+        PolicyStatus.PASS, PolicyReason.WITHIN_RANGE, D("0.05"))
+    assert decision(report, PolicyKind.INDIVIDUAL_STOCK).status is PolicyStatus.BREACH
+    outside = complete_analysis(core="39", growth="15", stocks="36", cash="10")
+    breached = PortfolioPolicyEngine(load_portfolio_policy_config(CONFIG_FILE)).evaluate(
+        outside, etf_classifications=complete_classifications(outside))
+    core = allocation(breached, AllocationBucket.CORE_ETF)
+    assert (core.status, core.reason_code, core.target_delta_ratio) == (
+        PolicyStatus.BREACH, PolicyReason.BELOW_MINIMUM, D("-0.11"))
+
+
+def test_zero_total_unreliable_analysis_and_duplicate_positions_are_unknown():
+    engine = PortfolioPolicyEngine(config())
+    empty = complete_analysis(core="0", growth="0", stocks="0", cash="0")
+    assert {item.reason_code for item in engine.evaluate(empty).allocation_evaluations} == {
+        PolicyReason.ZERO_TOTAL_VALUE}
+    data = complete_analysis()
+    assert {item.reason_code for item in engine.evaluate(
+        replace(data, fx_fresh=False), etf_classifications=complete_classifications(data)
+    ).allocation_evaluations} == {PolicyReason.UNRELIABLE_ANALYSIS}
+    duplicate = replace(data, positions=data.positions + (data.positions[0],))
+    report = engine.evaluate(duplicate, etf_classifications=complete_classifications(data))
+    assert {item.reason_code for item in report.allocation_evaluations} == {
+        PolicyReason.DUPLICATE_POSITION}
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.UNKNOWN
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda data: replace(data, invested_market_value=D("89")),
+    lambda data: replace(data, etf_market_value=D("64")),
+    lambda data: replace(data, cash_ratio=None),
+    lambda data: replace(data, positions=(replace(data.positions[0], weight=None),) + data.positions[1:]),
+    lambda data: replace(data, sector_classified_market_value=D("24")),
+    lambda data: replace(data, direct_sector_exposure=(
+        DirectSectorExposure("Utilities", D("25"), D("0.25")),)),
+])
+def test_missing_or_mismatched_analysis_evidence_cannot_pass_allocation(mutation):
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(config()).evaluate(
+        mutation(data), etf_classifications=complete_classifications(data))
+    assert {item.reason_code for item in report.allocation_evaluations} == {
+        PolicyReason.INVALID_EXPOSURE}
+
+
+def test_invalid_position_type_and_container_do_not_claim_allocation_suitability():
+    data = complete_analysis()
+    engine = PortfolioPolicyEngine(config())
+    wrong_type = replace(data, positions=(replace(data.positions[0], asset_type="ETF"),)
+                         + data.positions[1:])
+    report = engine.evaluate(wrong_type)
+    assert {item.reason_code for item in report.allocation_evaluations} == {
+        PolicyReason.INVALID_ANALYSIS}
+    assert {item.status for item in report.evaluations} == {PolicyStatus.UNKNOWN}
+    wrong_container = engine.evaluate(replace(data, positions=list(data.positions)))
+    assert {item.reason_code for item in wrong_container.allocation_evaluations} == {
+        PolicyReason.INVALID_ANALYSIS}
+
+
+@pytest.mark.parametrize("damaged", [None, object()])
+def test_extra_malformed_position_cannot_be_filtered_into_allocation_pass(damaged):
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(config()).evaluate(
+        replace(data, positions=data.positions + (damaged,)),
+        etf_classifications=complete_classifications(data))
+    assert {item.status for item in report.allocation_evaluations} == {PolicyStatus.UNKNOWN}
+    assert {item.reason_code for item in report.allocation_evaluations} == {
+        PolicyReason.INVALID_ANALYSIS}
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.UNKNOWN
+
+
+def test_two_valid_stock_ids_preserve_reconciled_risk_and_allocation_in_any_order():
+    data = two_stock_analysis()
+    classes = complete_classifications(data)
+    engine = PortfolioPolicyEngine(config())
+    report = engine.evaluate(data, etf_classifications=classes)
+    assert {item.status for item in report.evaluations} == {PolicyStatus.PASS}
+    assert {item.status for item in report.allocation_evaluations} == {PolicyStatus.PASS}
+    assert {item.target.identifier for item in report.evaluations
+            if item.policy is PolicyKind.INDIVIDUAL_STOCK} == {"stock-a", "stock-b"}
+    assert allocation(report, AllocationBucket.INDIVIDUAL_STOCKS).market_value_usd == D("25")
+    assert engine.evaluate(replace(data, positions=tuple(reversed(data.positions))),
+                           etf_classifications=tuple(reversed(classes))) == report
+
+
+@pytest.mark.parametrize("bad_id", [None, 7, ["stock-b"], "", "   "])
+def test_malformed_stock_asset_id_is_unknown_in_any_order_without_partial_pass(bad_id):
+    data = two_stock_analysis()
+    damaged_stock = replace(data.positions[-1], asset_id=bad_id)
+    data = replace(data, positions=data.positions[:-1] + (damaged_stock,))
+    classes = complete_classifications(data)
+    engine = PortfolioPolicyEngine(config())
+    reports = [engine.evaluate(replace(data, positions=positions),
+                               etf_classifications=classes)
+               for positions in (data.positions, tuple(reversed(data.positions)))]
+    assert reports[0] == reports[1]
+    for report in reports:
+        assert {item.status for item in report.evaluations} == {PolicyStatus.UNKNOWN}
+        assert {item.reason_code for item in report.evaluations} == {
+            PolicyReason.UNRELIABLE_ANALYSIS}
+        assert {item.status for item in report.allocation_evaluations} == {
+            PolicyStatus.UNKNOWN}
+        assert {item.reason_code for item in report.allocation_evaluations} == {
+            PolicyReason.INVALID_ANALYSIS}
+        assert PolicyKind.INDIVIDUAL_STOCK not in report.not_applicable
+
+
+@pytest.mark.parametrize("damaged", [None, object()])
+def test_malformed_direct_sector_member_is_unknown_without_sorting_exception(damaged):
+    data = complete_analysis()
+    report = PortfolioPolicyEngine(config()).evaluate(
+        replace(data, direct_sector_exposure=(damaged,)),
+        etf_classifications=complete_classifications(data))
+    sector = decision(report, PolicyKind.DIRECT_SECTOR)
+    assert (sector.status, sector.reason_code) == (
+        PolicyStatus.UNKNOWN, PolicyReason.INVALID_ANALYSIS)
+    assert {item.status for item in report.allocation_evaluations} == {PolicyStatus.UNKNOWN}
+    assert decision(report, PolicyKind.TOTAL_STOCK_EXPOSURE).status is PolicyStatus.PASS
+    assert decision(report, PolicyKind.CASH_RATIO).status is PolicyStatus.PASS
+
+
+def test_allocation_repeating_boundary_is_stable_under_decimal_context_changes():
+    third = D("0.3333333333333333333333333333333333333333")
+    other = D("0.6666666666666666666666666666666666666667")
+    bands = (
+        AllocationBand(AllocationBucket.CORE_ETF, third, third, third),
+        AllocationBand(AllocationBucket.GROWTH_ETF, other, D("0"), D("1")),
+        AllocationBand(AllocationBucket.INDIVIDUAL_STOCKS, D("0"), D("0"), D("1")),
+        AllocationBand(AllocationBucket.CASH, D("0"), D("0"), D("0")),
+    )
+    data = complete_analysis(core="1", growth="2", stocks="0", cash="0")
+    engine = PortfolioPolicyEngine(config(min_cash_ratio=D("0"), max_cash_ratio=D("0"),
+                                          allocation_bands=bands))
+    ordinary = engine.evaluate(data, etf_classifications=complete_classifications(data))
+    with localcontext() as context:
+        context.prec = 4
+        context.rounding = ROUND_DOWN
+        context.traps[Inexact] = True
+        constrained = engine.evaluate(data, etf_classifications=complete_classifications(data))
+    assert ordinary == constrained
+    assert allocation(ordinary, AllocationBucket.CORE_ETF).status is PolicyStatus.BREACH
+    assert allocation(ordinary, AllocationBucket.CORE_ETF).reason_code is PolicyReason.ABOVE_MAXIMUM
+
+
+def test_allocation_is_order_independent_and_inputs_and_results_are_immutable():
+    data = complete_analysis()
+    classes = complete_classifications(data)
+    engine = PortfolioPolicyEngine(config())
+    before = deepcopy(data)
+    first = engine.evaluate(data, etf_classifications=classes)
+    reversed_data = replace(data, positions=tuple(reversed(data.positions)))
+    assert engine.evaluate(reversed_data, etf_classifications=tuple(reversed(classes))) == first
+    assert data == before
+    with pytest.raises(FrozenInstanceError):
+        first.allocation_evaluations[0].status = PolicyStatus.BREACH
+    with pytest.raises(FrozenInstanceError):
+        classes[0].group = ETFGroup.GROWTH
+
+
+def test_offline_sqlite_analytics_to_policy_example(tmp_path):
+    complete, missing = run_example(tmp_path / "allocation-demo.sqlite")
+    assert [(item.bucket, item.market_value_usd, item.status)
+            for item in complete.allocation_evaluations] == [
+        (AllocationBucket.CORE_ETF, D("50"), PolicyStatus.PASS),
+        (AllocationBucket.GROWTH_ETF, D("15"), PolicyStatus.PASS),
+        (AllocationBucket.INDIVIDUAL_STOCKS, D("25"), PolicyStatus.PASS),
+        (AllocationBucket.CASH, D("10"), PolicyStatus.PASS),
+    ]
+    assert decision(complete, PolicyKind.INDIVIDUAL_STOCK).status is PolicyStatus.BREACH
+    assert {item.reason_code for item in missing.allocation_evaluations[:2]} == {
+        PolicyReason.UNCLASSIFIED_ETF}
+    assert all(item.status is PolicyStatus.UNKNOWN for item in missing.allocation_evaluations[:2])
