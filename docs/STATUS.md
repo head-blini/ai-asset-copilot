@@ -1,14 +1,14 @@
 # Asset Copilot — Project Status
 
-Last local verification: 2026-09-25 (KST). Canonical repository: `head-blini/ai-asset-copilot`. This STATUS is on an unmerged Policy candidate, not on main. R0 PR #1 has its own unmerged documentation state.
+Last local verification: 2026-09-26 (KST). Canonical repository: `head-blini/ai-asset-copilot`. This STATUS is on an unmerged Policy candidate, not on main. Its older R0/main descriptions below are historical; current main STATUS controls adopted feature state. Remote main `77a832b5d718ab78a2ce4ded8e1df219c1e6883d` has BUD-01 and WEB-01 complete for their offline and local-preview gates, respectively. Their code and status are unchanged by this candidate.
 
 ## Current phase and Git evidence
 
 - Phase 0–3: **DONE**, merged on main.
 - Phase 4 — **US Portfolio Policy: IN REVIEW / NOT DONE**.
-- Main / origin/main: `0071d2b074be686392348ad6fbeec47d596e90de`.
+- Current origin/main: `77a832b5d718ab78a2ce4ded8e1df219c1e6883d`; `0071d2b074be686392348ad6fbeec47d596e90de` below is the historical Policy-branch fork baseline, not current main.
 - Preserved Policy baseline: `feat/phase-4-policy-engine` at `089ee027bbdb03557d83cb081e0acd35694c23fe`.
-- P4-05 review worktree: `feat/p4-allocation-completion`, based on that Policy SHA. R0 PR #1 remains separate at `9cd1a0f52b457352fca7d76500daac57d9dbdd25`.
+- P4-05 review worktree: `feat/p4-allocation-completion`, based on that Policy SHA. R0 PR #1 was subsequently merged into main; this Policy branch has not merged current main.
 - Original candidate implementation: `681ef60e3977eda701c7544cfcd32d9b5e685071` (not merged).
 - Audited corrected Policy implementation SHA: `36eafe8e80d433fdf2f728b14a34be072ce67233`.
 - Subsequent verification-record commits change documentation only; the remote branch HEAD identifies the latest governance document revision.
@@ -38,6 +38,7 @@ Last local verification: 2026-09-25 (KST). Canonical repository: `head-blini/ai-
 
 ## Verification and audit evidence
 
+- P4-05 malformed STOCK `asset_id` follow-up: starting PR #2 head `d1beb1b8e0cfc25371ed2dc6954cd85bf18e12f0` in this clean worktree's `.venv` (macOS Python 3.11.15, pytest 9.1.1; evaluator import resolved to this checkout) reran `.venv/bin/python -m pytest` → **265 passed**, `.venv/bin/python -m pip check` → clean, `git diff --check` → clean, and `.venv/bin/python examples/p4_allocation_offline.py` → four complete PASS buckets and expected Core/Growth UNKNOWN without one classification. Independent full `evaluate()` reproduction split a reconciled 25 USD STOCK holding into two 12.5 USD positions: normal string IDs passed in both orders; `None`, integer and list IDs raised `TypeError` from `sorted()` in both orders; empty and whitespace IDs returned UNKNOWN. The new targeted regression then produced **3 failed, 3 passed, 132 deselected** before the fix. Code/test commit `416ee923d8a2e845e27a4f0ebe337d4e52df9244` sorts only after position shape validation and reports malformed individual-stock identity as UNKNOWN without a partial PASS. On that code SHA, `.venv/bin/python -m pytest` → **271 passed** (policy file: 138 passed), `.venv/bin/python -m pip check` → clean, `git diff --check` → clean, and the offline example retained its output. Invalid position Risk reasons remain `UNRELIABLE_ANALYSIS`; all four allocation reasons remain `INVALID_ANALYSIS`. Valid unclassified ETF and incomplete direct-sector evidence retain their separate handling; explicitly invalid ETF classification input is still rejected. New-head CI must be checked after push and is not established by these local results.
 - P4-05 review correction, code/test SHA `938fec30cecc8e35bfcc432d0d2715e0f6097aea`: baseline PR #2 head `709e12f1bb82ea65bf94d83c890d24ebcd585f96` rerun in this worktree with `.venv/bin/python -m pytest` → **261 passed**. Four new targeted cases then failed before the fix: malformed extra position incorrectly produced allocation PASS twice; malformed direct-sector members raised `AttributeError` twice. After the correction at the code/test SHA, `.venv/bin/python -m pytest` → **265 passed in 0.31s**, `.venv/bin/python -m pip check` → no broken requirements, `git diff --check` → pass. `.venv/bin/python examples/p4_allocation_offline.py` still reports four complete PASS allocations and ETF Core/Growth UNKNOWN when a classification is missing. macOS Python 3.11.15, pytest 9.1.1; `asset_copilot.__file__` resolves to this worktree. This is local evidence; updated PR head CI must be checked separately.
 - The correction checks original `analysis.positions` before allocation rather than accepting filtered valid positions. Direct-sector members are validated before sorting; invalid structure yields an explicit direct-sector UNKNOWN while independent total-STOCK and cash results remain available. Existing normal classification, concentration, inclusive cash/range and Decimal behavior is unchanged.
 - P4-05 worktree environment: its own `.venv`, macOS, Python 3.11.15, pytest 9.1.1; `asset_copilot.__file__` resolves to this checkout's `src/asset_copilot`. This is a local environment, not GitHub Actions.
@@ -77,7 +78,7 @@ The candidate's ROADMAP and PROJECT_SPEC completion claims are retracted. The or
 
 ## Immediate next work and limits
 
-Review the isolated P4-05 candidate without merging R0 or the Policy branch into main. The next implementation task after this candidate review is a small design review and P4-06/07 implementation of policy content/version/effective-time history, human approval, and AI write denial. These are existing Phase 4 blockers, not requirements transferred to a future Phase. The wider first-user path and follow-up order are in ROADMAP; Toss read capability research is independent and grants no account or order access.
+Review the isolated P4-05 candidate without merging current main into PR #2 or the Policy branch into main. A later integration must preserve current main's BUD-01/WEB-01 code, optional web dependencies, Core/web CI and actual DONE status, while reconciling this candidate's older documents against main. The next implementation task after this candidate review is a small design review and P4-06/07 implementation of policy content/version/effective-time history, human approval, and AI write denial. These are existing Phase 4 blockers, not requirements transferred to a future Phase. The wider first-user path and follow-up order are in ROADMAP; Toss read capability research is independent and grants no account or order access.
 
 No ETF look-through, Policy write authorization, overall compliance verdict, rebalancing, or order approval is claimed by the candidate evaluator. A bucket PASS does not override an independent Risk BREACH or establish Phase completion. Phase 5 implementation is prohibited while these blockers remain.
 
